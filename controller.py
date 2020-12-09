@@ -5,15 +5,24 @@ import torch.optim as optim
 
 
 class Controller(torch.nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, action_dim):
         super().__init__()
-        self.state_dim = state_dim
         self.action_dim = action_dim
 
-        self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule('!', [0, 1, 2, 3]),
-                                                            Rule('!', [0, 1, 2, 3])]),
-                                        '1': nn.ModuleList([Rule('!', [0, 1, 2, 3]),
-                                                            Rule('!', [0, 1, 2, 3])])})
+        self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3]),
+                                                            Rule([0, 1, 2, 3])]),
+                                        '1': nn.ModuleList([Rule([0, 1, 2, 3]),
+                                                            Rule([0, 1, 2, 3])])})
+        # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2]),
+        #                                                     Rule([1, 2, 3])]),
+        #                                 '1': nn.ModuleList([Rule([0, 1, 2]),
+        #                                                     Rule([1, 2, 3])])})
+        # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0]), Rule([1]), Rule([2]), Rule([3]),
+        #                                                     Rule([0, 1]), Rule([0, 2]), Rule([0, 3]), Rule([1, 2]), Rule([1, 3]), Rule([2, 3]),
+        #                                                     Rule([0, 1, 2]), Rule([0, 1, 3]), Rule([1, 2, 3])]),
+        #                                 '1': nn.ModuleList([Rule([0]), Rule([1]), Rule([2]), Rule([3]),
+        #                                                     Rule([0, 1]), Rule([0, 2]), Rule([0, 3]), Rule([1, 2]), Rule([1, 3]), Rule([2, 3]),
+        #                                                     Rule([0, 1, 2]), Rule([0, 1, 3]), Rule([1, 2, 3])])})
 
     def forward(self, s):  # get action distribution
         strength_all = torch.zeros((s.shape[0], self.action_dim)).cuda()
@@ -25,9 +34,8 @@ class Controller(torch.nn.Module):
 
 
 class Rule(torch.nn.Module):
-    def __init__(self, id, state_id):
+    def __init__(self, state_id):
         super().__init__()
-        self.id = id
         self.state_id = state_id
 
         self.membership_network_list = nn.ModuleList()
@@ -46,15 +54,15 @@ class Rule(torch.nn.Module):
 class MembershipNetwork(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.dense1 = torch.nn.Linear(1, 8)
-        self.dense2 = torch.nn.Linear(8, 8)
-        self.dense3 = torch.nn.Linear(8, 1)
+        self.dense1 = torch.nn.Linear(1, 32)
+        self.dense2 = torch.nn.Linear(32, 32)
+        self.dense3 = torch.nn.Linear(32, 1)
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in')
 
     def forward(self, s):  # get membership
-        x = F.relu(self.dense1(s))
-        x = F.relu(self.dense2(x))
+        x = F.leaky_relu(self.dense1(s))
+        x = F.leaky_relu(self.dense2(x))
         return torch.sigmoid(self.dense3(x))

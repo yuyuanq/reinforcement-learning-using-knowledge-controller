@@ -11,11 +11,11 @@ class PPO(nn.Module):
         self.config = config
         self.data = []
 
-        self.fc1 = nn.Linear(4, 256)
+        self.fc1 = nn.Linear(self.config.state_dim, 256)
         if config.no_controller:
-            self.fc_pi = nn.Linear(256, 2)
+            self.fc_pi = nn.Linear(256, self.config.action_dim)
         else:
-            self.controller = Controller(state_dim=self.config.state_dim, action_dim=self.config.action_dim).cuda()
+            self.controller = Controller(action_dim=self.config.action_dim).cuda()
         self.fc_v = nn.Linear(256, 1)
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
