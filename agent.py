@@ -11,13 +11,13 @@ class PPO(nn.Module):
         self.data = []
 
         self.fc1 = nn.Linear(4, 256)
-        self.fc_pi = nn.Linear(256, 2)
+        if config.no_controller:
+            self.fc_pi = nn.Linear(256, 2)
         self.fc_v = nn.Linear(256, 1)
         self.config = config
-        self.controller = Controller(state_dim=self.config.state_dim, action_dim=self.config.action_dim).cuda()
+        self.controller = Controller(state_dim=self.config.state_dim, action_dim=self.config.action_dim)
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
 
-        # he initialization
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in')
@@ -75,7 +75,6 @@ class PPO(nn.Module):
                 pi = self.pi(s, softmax_dim=1)
             else:
                 pi = self.controller(s)
-            # print(pi)
 
             pi_a = pi.gather(1, a)
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
