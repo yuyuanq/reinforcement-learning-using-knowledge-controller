@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from controller import Controller
 
 
 class PPO(nn.Module):
@@ -9,12 +10,17 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(4, 256).cuda()
-        self.fc_pi = nn.Linear(256, 2).cuda()
-        self.fc_v = nn.Linear(256, 1).cuda()
+        self.fc1 = nn.Linear(4, 256)
+        self.fc_pi = nn.Linear(256, 2)
+        self.fc_v = nn.Linear(256, 1)
         self.config = config
-
+        self.controller = Controller(state_dim=self.config.state_dim, action_dim=self.config.action_dim).cuda()
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
+
+        # he initialization
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in')
 
     def pi(self, x, softmax_dim=0):
         x = F.relu(self.fc1(x))
@@ -65,7 +71,12 @@ class PPO(nn.Module):
             advantage_lst.reverse()
             advantage = torch.tensor(advantage_lst, dtype=torch.float).cuda()
 
-            pi = self.pi(s, softmax_dim=1)
+            if self.config.no_controller:
+                pi = self.pi(s, softmax_dim=1)
+            else:
+                pi = self.controller(s)
+            # print(pi)
+
             pi_a = pi.gather(1, a)
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
 

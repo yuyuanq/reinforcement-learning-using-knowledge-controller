@@ -24,8 +24,8 @@ class Environment:
             r = 0
         return s, r, d, info
 
-    def get_space(self):
-        return self.env.action_space, self.env.observation_space
+    def get_space_dim(self):
+        return self.env.action_space.n, self.env.observation_space.shape[0]
 
     def close(self):
         self.env.close()
