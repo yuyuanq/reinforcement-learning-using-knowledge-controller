@@ -8,14 +8,16 @@ from controller import Controller
 class PPO(nn.Module):
     def __init__(self, config):
         super(PPO, self).__init__()
+        self.config = config
         self.data = []
 
         self.fc1 = nn.Linear(4, 256)
         if config.no_controller:
             self.fc_pi = nn.Linear(256, 2)
+        else:
+            self.controller = Controller(state_dim=self.config.state_dim, action_dim=self.config.action_dim).cuda()
         self.fc_v = nn.Linear(256, 1)
-        self.config = config
-        self.controller = Controller(state_dim=self.config.state_dim, action_dim=self.config.action_dim)
+
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
 
         for m in self.modules():
