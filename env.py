@@ -25,7 +25,7 @@ class Environment:
         return s, r, d, info
 
     def get_space_dim(self):
-        return self.env.action_space.n, self.env.observation_space.shape[0]
+        return self.env.observation_space.shape[0], self.env.action_space.n
 
     def close(self):
         self.env.close()

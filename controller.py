@@ -9,14 +9,19 @@ class Controller(torch.nn.Module):
         super().__init__()
         self.action_dim = action_dim
 
+        # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3])]),
+        #                                 '1': nn.ModuleList([Rule([0, 1, 2, 3])])})
+
         self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3]),
                                                             Rule([0, 1, 2, 3])]),
                                         '1': nn.ModuleList([Rule([0, 1, 2, 3]),
                                                             Rule([0, 1, 2, 3])])})
+
         # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2]),
         #                                                     Rule([1, 2, 3])]),
         #                                 '1': nn.ModuleList([Rule([0, 1, 2]),
         #                                                     Rule([1, 2, 3])])})
+
         # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0]), Rule([1]), Rule([2]), Rule([3]),
         #                                                     Rule([0, 1]), Rule([0, 2]), Rule([0, 3]), Rule([1, 2]), Rule([1, 3]), Rule([2, 3]),
         #                                                     Rule([0, 1, 2]), Rule([0, 1, 3]), Rule([1, 2, 3])]),
@@ -29,7 +34,7 @@ class Controller(torch.nn.Module):
 
         for i in range(self.action_dim):
             rule_list_for_action = [rule(s).reshape(-1, 1) for rule in self.rule_dict[str(i)]]
-            strength_all[:, i] = torch.max(torch.cat(rule_list_for_action, 1), 1)[0]  # max
+            strength_all[:, i] = torch.min(torch.cat(rule_list_for_action, 1), 1)[0]  # max
         return F.softmax(strength_all, dim=1)
 
 
@@ -63,6 +68,6 @@ class MembershipNetwork(torch.nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in')
 
     def forward(self, s):  # get membership
-        x = F.leaky_relu(self.dense1(s))
-        x = F.leaky_relu(self.dense2(x))
+        x = F.relu(self.dense1(s))
+        x = F.relu(self.dense2(x))
         return torch.sigmoid(self.dense3(x))
