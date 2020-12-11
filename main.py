@@ -7,9 +7,10 @@ from env import Environment
 from agent import PPO
 import os
 import time
-import yaml
 from logger import logger
 import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_theme(style="darkgrid")
 
 
 def train():
@@ -82,9 +83,9 @@ def train():
                             y = torch.zeros_like(x).cuda()
 
                             for i, _ in enumerate(x):
-                                y[i] = _membership_network(_.reshape(-1, 1)).item()
+                                y[i] = _membership_network(_.reshape(-1, 1)).detach()
 
-                            plt.plot(x.cpu().numpy(), y.cpu().numpy())
+                            sns.lineplot(x=x.cpu().numpy(), y=y.cpu().numpy())
                             plt.box(True)
                             plt.ylim([0, 1])
                             writer.add_figure('action_{}_rule_{}/state_{}'.format(_action, k, state_id), fig,
@@ -115,7 +116,7 @@ if __name__ == '__main__':
     p.add_argument('--save_interval', type=int, default=5000, help='The save interval during training')
     p.add_argument('--k_epoch', type=int, default=3, help='Epoch per training')
     p.add_argument('--t_horizon', type=int, default=128, help='Max horizon per training')
-    p.add_argument('--learning_rate', type=float, default=5e-4, help='Learning rate for training')
+    p.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for training')
     p.add_argument('--gamma', type=float, default=0.99, help='Discount of reward')
     p.add_argument('--lmbda', type=float, default=0.95, help='Discount of GAE')
     p.add_argument('--eps_clip', type=float, default=0.2, help='Clip epsilon of PPO')
@@ -135,8 +136,8 @@ if __name__ == '__main__':
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
-    with open(os.path.join(log_dir, 'config.yaml'), 'w') as f:
-        yaml.dump(config, f)
+    with open(os.path.join(log_dir, 'config.yml'), 'w') as f:
+        f.write('\n'.join(["%s: %s" % (key, value) for key, value in vars(config).items()]))
 
     for k in list(vars(config).keys()):
         logger.info('%s: %s' % (k, vars(config)[k]))

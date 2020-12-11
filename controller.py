@@ -9,10 +9,8 @@ class Controller(torch.nn.Module):
         super().__init__()
         self.action_dim = action_dim
 
-        self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3]),
-                                                            Rule([0, 1, 2, 3])]),
-                                        '1': nn.ModuleList([Rule([0, 1, 2, 3]),
-                                                            Rule([0, 1, 2, 3])])})
+        self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3])]),
+                                        '1': nn.ModuleList([Rule([0, 1, 2, 3])])})
 
     def forward(self, s):  # get action distribution
         strength_all = torch.zeros((s.shape[0], self.action_dim)).cuda()
@@ -20,7 +18,7 @@ class Controller(torch.nn.Module):
         for i in range(self.action_dim):
             rule_list_for_action = [rule(s).reshape(-1, 1) for rule in self.rule_dict[str(i)]]
             strength_all[:, i] = torch.max(torch.cat(rule_list_for_action, 1), 1)[0]  # max
-        return F.softmax(strength_all * 10, dim=1)
+        return F.softmax(strength_all * 5, dim=1)
 
 
 class Rule(torch.nn.Module):
