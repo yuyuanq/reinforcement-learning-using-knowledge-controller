@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from network import Actor, Critic
 from controller import Controller
 
 
@@ -11,29 +12,14 @@ class PPO(nn.Module):
         self.config = config
         self.data = []
 
-        self.fc1 = nn.Linear(state_dim, 32)
         if config.no_controller:
-            self.fc_pi = nn.Linear(32, action_dim)
+            self.actor = Actor(state_dim, action_dim)
         else:
-            self.controller = Controller(action_dim=action_dim).cuda()
-        self.fc_v = nn.Linear(32, 1)
+            self.actor = Controller(action_dim)
+
+        self.critic = Critic(state_dim)
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
-
-        for m in self.modules():
-            if isinstance(m, (nn.Conv2d, nn.Linear)):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in')
-
-    def pi(self, x, softmax_dim=0):
-        x = F.relu(self.fc1(x))
-        x = self.fc_pi(x)
-        prob = F.softmax(x, dim=softmax_dim)
-        return prob
-
-    def v(self, x):
-        x = F.relu(self.fc1(x))
-        v = self.fc_v(x)
-        return v
 
     def put_data(self, transition):
         self.data.append(transition)
@@ -61,8 +47,8 @@ class PPO(nn.Module):
         s, a, r, s_prime, done_mask, prob_a = [x.cuda() for x in self.make_batch()]
 
         for i in range(self.config.k_epoch):
-            td_target = r + self.config.gamma * self.v(s_prime) * done_mask
-            delta = td_target - self.v(s)
+            td_target = r + self.config.gamma * self.critic(s_prime) * done_mask
+            delta = td_target - self.critic(s)
             delta = delta.detach().cpu().numpy()
 
             advantage_lst = []
@@ -73,17 +59,14 @@ class PPO(nn.Module):
             advantage_lst.reverse()
             advantage = torch.tensor(advantage_lst, dtype=torch.float).cuda()
 
-            if self.config.no_controller:
-                pi = self.pi(s, softmax_dim=1)
-            else:
-                pi = self.controller(s)
+            pi = self.actor(s, softmax_dim=1) if self.config.no_controller else self.actor(s)
 
             pi_a = pi.gather(1, a)
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
 
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.config.eps_clip, 1 + self.config.eps_clip) * advantage
-            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.v(s), td_target.detach())
+            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.critic(s), td_target.detach())
 
             self.optimizer.zero_grad()
             loss.mean().backward()
