@@ -1,3 +1,4 @@
+import numpy as np
 import configargparse
 import torch
 import torch.nn as nn
@@ -9,8 +10,41 @@ import os
 import time
 from logger import logger
 import matplotlib.pyplot as plt
+import matplotlib
 import seaborn as sns
+
 sns.set_theme(style="darkgrid")
+matplotlib.use('Agg')
+
+
+def apply_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    # Remove randomness (may be slower on Tesla GPUs)
+    # https://pytorch.org/docs/stable/notes/randomness.html
+    if seed == 0:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def plot_mf(model, ob_low, ob_high, writer, update_count):
+    for _action in model.actor.rule_dict.keys():
+        for k, _rule in enumerate(model.actor.rule_dict[_action]):
+            for j, _membership_network in enumerate(_rule.membership_network_list):
+                fig = plt.figure(figsize=(4, 3))
+
+                state_id = _rule.state_id[j]
+                x = torch.linspace(ob_low[state_id], ob_high[state_id], 100).cuda()
+                y = torch.zeros_like(x).cuda()
+
+                for i, _ in enumerate(x):
+                    y[i] = _membership_network(_.reshape(-1, 1)).detach()
+
+                sns.lineplot(x=x.cpu().numpy(), y=y.cpu().numpy())
+                plt.box(True)
+                plt.ylim([0, 1])
+                writer.add_figure('action_{}_rule_{}/state_{}'.format(_action, k, state_id), fig, update_count)
 
 
 def train():
@@ -34,21 +68,17 @@ def train():
     ep_reward = 0
     last_ep_reward = 0
 
-    # For plot mf
     ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
     ob_high[1], ob_low[1] = 10, -10
     ob_high[3], ob_low[3] = 10, -10
-    logger.info('ob_high: {}'.format(ob_high))
     logger.info('ob_low: {}'.format(ob_low))
+    logger.info('ob_high: {}'.format(ob_high))
     logger.info('-' * 50)
 
     s = env.reset()
     while True:
         for i in range(config.t_horizon):
-            if config.no_controller:
-                prob = model.actor(torch.from_numpy(s).float().cuda())
-            else:
-                prob = torch.squeeze(model.actor(torch.from_numpy(s).float().reshape(1, -1).cuda()))
+            prob = model.actor(torch.from_numpy(s).float().cuda())
 
             m = Categorical(prob)
             a = m.sample().item()
@@ -73,23 +103,7 @@ def train():
 
         if config.log_extra and (update_count % config.log_extra_interval == 0 or update_count == 1):
             if not config.no_controller:
-                for _action in model.actor.rule_dict.keys():
-                    for k, _rule in enumerate(model.actor.rule_dict[_action]):
-                        for j, _membership_network in enumerate(_rule.membership_network_list):
-                            fig = plt.figure(figsize=(4, 3))
-
-                            state_id = _rule.state_id[j]
-                            x = torch.linspace(ob_low[state_id], ob_high[state_id], 100).cuda()
-                            y = torch.zeros_like(x).cuda()
-
-                            for i, _ in enumerate(x):
-                                y[i] = _membership_network(_.reshape(-1, 1)).detach()
-
-                            sns.lineplot(x=x.cpu().numpy(), y=y.cpu().numpy())
-                            plt.box(True)
-                            plt.ylim([0, 1])
-                            writer.add_figure('action_{}_rule_{}/state_{}'.format(_action, k, state_id), fig,
-                                              update_count)
+                plot_mf(model, ob_low, ob_high, writer, update_count)
 
         if update_count % config.save_interval == 0:
             torch.save(model.state_dict(), os.path.join(model_dir, 'model_{}.pkl'.format(update_count)))
@@ -108,7 +122,7 @@ if __name__ == '__main__':
     p.add_argument('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file')
     p.add_argument('--output_dir', type=str, default='./output/', help='The name of environment')
     p.add_argument('--env', type=str, default='CartPole-v1', help='The name of environment')
-    p.add_argument('--seed', type=int, default=0, help='Seed for environment')
+    p.add_argument('--seed', type=int, default=0, help='Seed for reproducible')
     p.add_argument('--delay_step', type=int, default=1, help='Delay step for environment')
     p.add_argument('--reward_ratio', type=int, default=100, help='The ratio of reward reduction')
     # p.add_argument('--max_episode', type=int, default=5000, help='Max episode for training')
@@ -143,4 +157,5 @@ if __name__ == '__main__':
         logger.info('%s: %s' % (k, vars(config)[k]))
     logger.info("-" * 50)
 
+    apply_seed(config.seed)
     train()
