@@ -1,7 +1,6 @@
 import numpy as np
 import configargparse
 import torch
-import torch.nn as nn
 from torch.distributions import Categorical
 from tensorboardX import SummaryWriter
 from env import Environment
@@ -14,18 +13,14 @@ import matplotlib
 import seaborn as sns
 
 sns.set_theme(style="darkgrid")
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 
 
 def apply_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
-
-    # Remove randomness (may be slower on Tesla GPUs)
-    # https://pytorch.org/docs/stable/notes/randomness.html
-    if seed == 0:
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def plot_mf(model, ob_low, ob_high, writer, update_count):
@@ -55,13 +50,13 @@ def train():
     model = PPO(config, state_dim, action_dim).cuda()
 
     for m in model.modules():
-        if isinstance(m, (nn.Conv2d, nn.Linear)):
-            nn.init.kaiming_normal_(m.weight, mode='fan_in')
+        if isinstance(m, (torch.nn.Conv2d, torch.nn.Linear)):
+            torch.nn.init.orthogonal_(m.weight, 0.1)
+            # torch.nn.init.kaiming_normal_(m.weight, nonlinearity='leaky_relu', mode='fan_in')
 
     for name, param in model.named_parameters():
         if param.requires_grad:
-            logger.info('%s: %s' % (name, param.size()))
-    logger.info("-" * 50)
+            logger.debug('%s: %s' % (name, param.size()))
 
     update_count = 0
     ep_count = 0
@@ -69,23 +64,25 @@ def train():
     last_ep_reward = 0
 
     ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
-    ob_high[1], ob_low[1] = 10, -10
-    ob_high[3], ob_low[3] = 10, -10
-    logger.info('ob_low: {}'.format(ob_low))
-    logger.info('ob_high: {}'.format(ob_high))
-    logger.info('-' * 50)
+    NUM_HIGH, NUM_LIMIT = 1000, 10
+    for i, (_1, _2) in enumerate(zip(ob_high, ob_low)):
+        ob_high[i] = NUM_LIMIT if _1 > NUM_HIGH else _1
+        ob_low[i] = -NUM_LIMIT if _2 < -NUM_HIGH else _2
+
+    logger.debug('ob_low: {}'.format(ob_low))
+    logger.debug('ob_high: {}'.format(ob_high))
 
     s = env.reset()
     while True:
         for i in range(config.t_horizon):
-            prob = model.actor(torch.from_numpy(s).float().cuda())
+            prob = model.actor(torch.unsqueeze(torch.from_numpy(s), 0).float().cuda())
 
             m = Categorical(prob)
             a = m.sample().item()
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
-            model.put_data((s, a, r / config.reward_ratio, s_prime, prob[a].item(), done))
+            model.put_data((s, a, r / config.reward_ratio, s_prime, torch.squeeze(prob)[a].item(), done))
             s = s_prime
 
             if done:
@@ -99,7 +96,12 @@ def train():
         update_count += 1
 
         if update_count % config.print_interval == 0:
-            logger.info("episode: {}, update count: {}, reward: {:.1f}".format(ep_count, update_count, last_ep_reward))
+            if config.no_controller:
+                logger.info(
+                    "episode: {}, update count: {}, reward: {:.1f}".format(ep_count, update_count, last_ep_reward))
+            else:
+                logger.info(
+                    "episode: {}, update count: {}, reward: {:.1f}, p_cof: {:.2f}".format(ep_count, update_count, last_ep_reward, model.actor.p_cof))
 
         if config.log_extra and (update_count % config.log_extra_interval == 0 or update_count == 1):
             if not config.no_controller:
@@ -126,7 +128,7 @@ if __name__ == '__main__':
     p.add_argument('--delay_step', type=int, default=1, help='Delay step for environment')
     p.add_argument('--reward_ratio', type=int, default=100, help='The ratio of reward reduction')
     # p.add_argument('--max_episode', type=int, default=5000, help='Max episode for training')
-    p.add_argument('--max_update', type=int, default=25000, help='Max update count for training')
+    p.add_argument('--max_update', type=int, default=10000, help='Max update count for training')
     p.add_argument('--save_interval', type=int, default=5000, help='The save interval during training')
     p.add_argument('--k_epoch', type=int, default=3, help='Epoch per training')
     p.add_argument('--t_horizon', type=int, default=128, help='Max horizon per training')
@@ -136,7 +138,7 @@ if __name__ == '__main__':
     p.add_argument('--eps_clip', type=float, default=0.2, help='Clip epsilon of PPO')
     p.add_argument('--print_interval', type=int, default=10, help='Print interval during training')
     p.add_argument('--no_controller', default=False, action='store_true', help='Whether to use the controller')
-    p.add_argument('--log_extra', default=True, action='store_true',
+    p.add_argument('--log_extra', default=False, action='store_true',
                    help='Whether to log extra information')
     p.add_argument('--log_extra_interval', type=int, default=1000, help='The log interval during training')
 
@@ -154,8 +156,7 @@ if __name__ == '__main__':
         f.write('\n'.join(["%s: %s" % (key, value) for key, value in vars(config).items()]))
 
     for k in list(vars(config).keys()):
-        logger.info('%s: %s' % (k, vars(config)[k]))
-    logger.info("-" * 50)
+        logger.debug('%s: %s' % (k, vars(config)[k]))
 
     apply_seed(config.seed)
     train()

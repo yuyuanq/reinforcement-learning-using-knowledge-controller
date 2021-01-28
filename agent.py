@@ -2,8 +2,33 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from network import Actor, Critic
 from controller import Controller
+
+
+class Actor(torch.nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super().__init__()
+        self.dense1 = torch.nn.Linear(state_dim, 32)
+        self.dense2 = torch.nn.Linear(32, 32)
+        self.dense3 = torch.nn.Linear(32, action_dim)
+
+    def forward(self, s, softmax_dim=1):
+        x = F.leaky_relu(self.dense1(s))
+        x = F.leaky_relu(self.dense2(x))
+        return F.softmax(self.dense3(x), dim=softmax_dim)
+
+
+class Critic(torch.nn.Module):
+    def __init__(self, state_dim):
+        super().__init__()
+        self.dense1 = torch.nn.Linear(state_dim, 32)
+        self.dense2 = torch.nn.Linear(32, 32)
+        self.dense3 = torch.nn.Linear(32, 1)
+
+    def forward(self, s):
+        x = F.leaky_relu(self.dense1(s))
+        x = F.leaky_relu(self.dense2(x))
+        return self.dense3(x)
 
 
 class PPO(nn.Module):
@@ -15,8 +40,8 @@ class PPO(nn.Module):
         if config.no_controller:
             self.actor = Actor(state_dim, action_dim)
         else:
-            self.actor = Controller(action_dim)
-
+            self.actor = Controller(state_dim, action_dim)
+            self.p_delta = (self.actor.p_cof - self.actor.p_cof_end) / self.actor.p_total_step
         self.critic = Critic(state_dim)
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
@@ -59,7 +84,8 @@ class PPO(nn.Module):
             advantage_lst.reverse()
             advantage = torch.tensor(advantage_lst, dtype=torch.float).cuda()
 
-            pi = self.actor(s, softmax_dim=1) if self.config.no_controller else self.actor(s)
+            # pi = self.actor(s, softmax_dim=1) if self.config.no_controller else self.actor(s)
+            pi = self.actor(s)
 
             pi_a = pi.gather(1, a)
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
@@ -71,3 +97,6 @@ class PPO(nn.Module):
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+
+        if not self.config.no_controller:
+            self.actor.p_cof = max(self.actor.p_cof - self.p_delta, self.actor.p_cof_end)
