@@ -1,11 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from designed_rule import CartPoleRule
 
 
 class Controller(torch.nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, action_dim, config):
         super().__init__()
         self.action_dim = action_dim
         self.state_dim = state_dim
@@ -16,7 +15,15 @@ class Controller(torch.nn.Module):
 
         # Method 2 (human designed)
         self.rule_dict = nn.ModuleDict({'0': nn.ModuleList(), '1': nn.ModuleList()})
-        self.designed_rule_dic = CartPoleRule().rule_dict
+
+        if config.env == 'CartPole-v1':
+            from designed_rule import CartPoleRule as DesignedRule
+        elif config.env == 'FlappyBird':
+            from designed_rule import FlappyBirdRule as DesignedRule
+        else:
+            raise ValueError
+
+        self.designed_rule_dic = DesignedRule().rule_dict
         for action_id, rule_list_list in self.designed_rule_dic.items():
             for rule_list in rule_list_list:
                 self.rule_dict[str(action_id)].append(HardRule(rule_list))
@@ -32,14 +39,28 @@ class Controller(torch.nn.Module):
         self.w1_fc1 = nn.Linear(state_dim, self.hidden_num)
         self.w1_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
         self.w1_fc3 = nn.Linear(self.hidden_num, self.hidden_num * action_dim)
-
         self.b1_fc1 = nn.Linear(state_dim, self.hidden_num)
         self.b1_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
         self.b1_fc3 = nn.Linear(self.hidden_num, self.hidden_num)
-
         self.w2_fc1 = nn.Linear(state_dim, self.hidden_num)
         self.w2_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
         self.w2_fc3 = nn.Linear(self.hidden_num, self.hidden_num * action_dim)
+        # self.b2_fc1 = nn.Linear(state_dim, self.hidden_num)
+        # self.b2_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
+        # self.b2_fc3 = nn.Linear(self.hidden_num, self.action_dim)
+
+        torch.nn.init.orthogonal_(self.w1_fc1.weight, 0.1)
+        torch.nn.init.orthogonal_(self.w1_fc2.weight, 0.1)
+        torch.nn.init.orthogonal_(self.w1_fc3.weight, 0.01)
+        torch.nn.init.orthogonal_(self.b1_fc1.weight, 0.1)
+        torch.nn.init.orthogonal_(self.b1_fc2.weight, 0.1)
+        torch.nn.init.orthogonal_(self.b1_fc3.weight, 0.01)
+        torch.nn.init.orthogonal_(self.w2_fc1.weight, 0.1)
+        torch.nn.init.orthogonal_(self.w2_fc2.weight, 0.1)
+        torch.nn.init.orthogonal_(self.w2_fc3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.b2_fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.b2_fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.b2_fc3.weight, 0.01)
 
         self.p_cof = 0.7
         self.p_cof_end = 0.1
@@ -63,6 +84,8 @@ class Controller(torch.nn.Module):
             .reshape(-1, 1, self.hidden_num)
         w2 = self.w2_fc3(F.leaky_relu(self.w2_fc2(F.leaky_relu(self.w2_fc1(s))))) \
             .reshape(-1, self.hidden_num, self.action_dim)
+        # b2 = self.b2_fc3(F.leaky_relu(self.b2_fc2(F.leaky_relu(self.b2_fc1(s))))) \
+        #     .reshape(-1, 1, self.action_dim)
 
         p_prime = torch.sigmoid(
             torch.bmm(F.leaky_relu(torch.bmm(p.detach().reshape(-1, 1, self.action_dim), w1) + b1), w2)).\

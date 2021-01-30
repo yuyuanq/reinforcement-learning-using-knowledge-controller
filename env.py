@@ -1,7 +1,7 @@
 import gym
 
 
-class Environment:
+class GymEnvironment:
     def __init__(self, env_name, delay_step=1, seed=0):
         self.env = gym.make(env_name)
         self.env.seed(seed)

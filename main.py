@@ -3,14 +3,16 @@ import configargparse
 import torch
 from torch.distributions import Categorical
 from tensorboardX import SummaryWriter
-from env import Environment
+from env import GymEnvironment
 from agent import PPO
 import os
-import time
 from logger import logger
 import matplotlib.pyplot as plt
 import matplotlib
 import seaborn as sns
+from env_flappybird import FlappyBirdEnv
+import time
+
 
 sns.set_theme(style="darkgrid")
 # matplotlib.use('Agg')
@@ -45,14 +47,12 @@ def plot_mf(model, ob_low, ob_high, writer, update_count):
 def train():
     writer = SummaryWriter(log_dir=log_dir)
 
-    env = Environment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed, display_screen=False)
+    else:
+        env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
     model = PPO(config, state_dim, action_dim).cuda()
-
-    for m in model.modules():
-        if isinstance(m, (torch.nn.Conv2d, torch.nn.Linear)):
-            torch.nn.init.orthogonal_(m.weight, 0.1)
-            # torch.nn.init.kaiming_normal_(m.weight, nonlinearity='leaky_relu', mode='fan_in')
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -63,14 +63,14 @@ def train():
     ep_reward = 0
     last_ep_reward = 0
 
-    ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
-    NUM_HIGH, NUM_LIMIT = 1000, 10
-    for i, (_1, _2) in enumerate(zip(ob_high, ob_low)):
-        ob_high[i] = NUM_LIMIT if _1 > NUM_HIGH else _1
-        ob_low[i] = -NUM_LIMIT if _2 < -NUM_HIGH else _2
+    # ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
+    # num_high, num_limit = 1000, 10
+    # for i, (_1, _2) in enumerate(zip(ob_high, ob_low)):
+    #     ob_high[i] = num_limit if _1 > num_high else _1
+    #     ob_low[i] = -num_limit if _2 < -num_high else _2
 
-    logger.debug('ob_low: {}'.format(ob_low))
-    logger.debug('ob_high: {}'.format(ob_high))
+    # logger.debug('ob_low: {}'.format(ob_low))
+    # logger.debug('ob_high: {}'.format(ob_high))
 
     s = env.reset()
     while True:
@@ -80,6 +80,10 @@ def train():
             m = Categorical(prob)
             a = m.sample().item()
             s_prime, r, done, info = env.step(a)
+
+            # time.sleep(0.1)
+            # print(r)
+
             ep_reward += r
 
             model.put_data((s, a, r / config.reward_ratio, s_prime, torch.squeeze(prob)[a].item(), done))
@@ -103,9 +107,9 @@ def train():
                 logger.info(
                     "episode: {}, update count: {}, reward: {:.1f}, p_cof: {:.2f}".format(ep_count, update_count, last_ep_reward, model.actor.p_cof))
 
-        if config.log_extra and (update_count % config.log_extra_interval == 0 or update_count == 1):
-            if not config.no_controller:
-                plot_mf(model, ob_low, ob_high, writer, update_count)
+        # if config.log_extra and (update_count % config.log_extra_interval == 0 or update_count == 1):
+        #     if not config.no_controller:
+        #         plot_mf(model, ob_low, ob_high, writer, update_count)
 
         if update_count % config.save_interval == 0:
             torch.save(model.state_dict(), os.path.join(model_dir, 'model_{}.pkl'.format(update_count)))
@@ -127,7 +131,6 @@ if __name__ == '__main__':
     p.add_argument('--seed', type=int, default=0, help='Seed for reproducible')
     p.add_argument('--delay_step', type=int, default=1, help='Delay step for environment')
     p.add_argument('--reward_ratio', type=int, default=100, help='The ratio of reward reduction')
-    # p.add_argument('--max_episode', type=int, default=5000, help='Max episode for training')
     p.add_argument('--max_update', type=int, default=10000, help='Max update count for training')
     p.add_argument('--save_interval', type=int, default=5000, help='The save interval during training')
     p.add_argument('--k_epoch', type=int, default=3, help='Epoch per training')

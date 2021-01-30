@@ -40,7 +40,7 @@ class PPO(nn.Module):
         if config.no_controller:
             self.actor = Actor(state_dim, action_dim)
         else:
-            self.actor = Controller(state_dim, action_dim)
+            self.actor = Controller(state_dim, action_dim, config)
             self.p_delta = (self.actor.p_cof - self.actor.p_cof_end) / self.actor.p_total_step
         self.critic = Critic(state_dim)
 
@@ -92,6 +92,8 @@ class PPO(nn.Module):
 
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.config.eps_clip, 1 + self.config.eps_clip) * advantage
+
+            # print(torch.min(surr1, surr2).mean(), F.smooth_l1_loss(self.critic(s), td_target.detach()).mean())
             loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.critic(s), td_target.detach())
 
             self.optimizer.zero_grad()
