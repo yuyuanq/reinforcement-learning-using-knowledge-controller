@@ -18,7 +18,7 @@ class GymEnvironment:
         s, r, d, info = self.env.step(act)
         self.counter += 1
         if self.counter == self.delay_step:
-            r = self.delay_step
+            # r = self.delay_step
             self.counter = 0
         else:
             r = 0

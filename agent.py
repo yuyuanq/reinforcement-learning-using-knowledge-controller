@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from controller import Controller
+from torch.distributions import Categorical
 
 
 class Actor(torch.nn.Module):
@@ -45,6 +46,7 @@ class PPO(nn.Module):
         self.critic = Critic(state_dim)
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
+        self.MseLoss = nn.MSELoss()
 
     def put_data(self, transition):
         self.data.append(transition)
@@ -63,13 +65,16 @@ class PPO(nn.Module):
             done_lst.append([done_mask])
 
         s, a, r, s_prime, done_mask, prob_a = torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
-                                              torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
+                                              torch.tensor(r_lst, dtype=torch.float), torch.tensor(s_prime_lst,
+                                                                                                   dtype=torch.float), \
                                               torch.tensor(done_lst, dtype=torch.float), torch.tensor(prob_a_lst)
         self.data = []
         return s, a, r, s_prime, done_mask, prob_a
 
     def train_net(self):
         s, a, r, s_prime, done_mask, prob_a = [x.cuda() for x in self.make_batch()]
+        if self.config.use_reward_normalization:
+            r = (r - r.mean()) / (r.std() + 1e-5)
 
         for i in range(self.config.k_epoch):
             td_target = r + self.config.gamma * self.critic(s_prime) * done_mask
@@ -84,17 +89,19 @@ class PPO(nn.Module):
             advantage_lst.reverse()
             advantage = torch.tensor(advantage_lst, dtype=torch.float).cuda()
 
-            # pi = self.actor(s, softmax_dim=1) if self.config.no_controller else self.actor(s)
             pi = self.actor(s)
-
             pi_a = pi.gather(1, a)
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
 
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.config.eps_clip, 1 + self.config.eps_clip) * advantage
 
-            # print(torch.min(surr1, surr2).mean(), F.smooth_l1_loss(self.critic(s), td_target.detach()).mean())
-            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.critic(s), td_target.detach())
+            loss = -torch.min(surr1, surr2) + \
+                   self.config.mse_cof * self.MseLoss(self.critic(s), td_target.detach()) - \
+                   self.config.entropy_cof * Categorical(pi).entropy()
+            # print(-torch.min(surr1, surr2).mean().item(),
+            #       self.config.mse_cof * F.smooth_l1_loss(self.critic(s), td_target.detach()).mean().item(),
+            #       self.config.entropy_cof * entropy.mean().item())
 
             self.optimizer.zero_grad()
             loss.mean().backward()

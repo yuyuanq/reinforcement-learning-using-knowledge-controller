@@ -14,12 +14,14 @@ class Controller(torch.nn.Module):
         #                                 '1': nn.ModuleList([Rule([0, 1, 2, 3])])})
 
         # Method 2 (human designed)
-        self.rule_dict = nn.ModuleDict({'0': nn.ModuleList(), '1': nn.ModuleList()})
+        self.rule_dict = nn.ModuleDict({str(i): nn.ModuleList() for i in range(action_dim)})
 
         if config.env == 'CartPole-v1':
             from designed_rule import CartPoleRule as DesignedRule
         elif config.env == 'FlappyBird':
             from designed_rule import FlappyBirdRule as DesignedRule
+        elif config.env == 'LunarLander-v2':
+            from designed_rule import LunarLanderRule as DesignedRule
         else:
             raise ValueError
 
@@ -62,9 +64,9 @@ class Controller(torch.nn.Module):
         # torch.nn.init.orthogonal_(self.b2_fc2.weight, 0.1)
         # torch.nn.init.orthogonal_(self.b2_fc3.weight, 0.01)
 
-        self.p_cof = 0.7
-        self.p_cof_end = 0.1
-        self.p_total_step = 2000
+        self.p_cof = config.p_cof
+        self.p_cof_end = config.p_cof_end
+        self.p_total_step = config.p_total_step
 
     def forward(self, s):
         p_list = []
@@ -88,7 +90,7 @@ class Controller(torch.nn.Module):
         #     .reshape(-1, 1, self.action_dim)
 
         p_prime = torch.sigmoid(
-            torch.bmm(F.leaky_relu(torch.bmm(p.detach().reshape(-1, 1, self.action_dim), w1) + b1), w2)).\
+            torch.bmm(F.leaky_relu(torch.bmm(p.detach().reshape(-1, 1, self.action_dim), w1) + b1), w2)). \
             reshape(-1, self.action_dim)
 
         return torch.squeeze(F.softmax((p * self.p_cof + p_prime * (1 - self.p_cof)) / (1 / 10), dim=1))
