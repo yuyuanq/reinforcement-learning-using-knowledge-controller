@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def check(func, range=10):
-    x = np.linspace(-range, range, 1000)
-    plt.plot(x, list(map(func, x)))
+def check(func, range=10, num=10000):
+    x = np.linspace(-range, range, num=num)
+    plt.plot(x, func(x))
     plt.show()
 
 
@@ -12,10 +12,10 @@ class LunarLanderRule:
     def __init__(self):
         self.rule_dict = {
             0: [[self.s_no, self.s_no, self.s_no, self.s_no, self.s_no, self.s_no]],
-            1: [[self.s_any, self.s_any, self.s_any, self.s_any, self.s4_po, self.s5_po],
+            3: [[self.s_any, self.s_any, self.s_any, self.s_any, self.s4_po, self.s5_po],
                 [self.s0_ne, self.s_any, self.s_any, self.s_any, self.s4_sm, self.s_any]],
             2: [[self.s_any, self.s1_sm, self.s_any, self.s3_la, self.s_any, self.s_any]],
-            3: [[self.s_any, self.s_any, self.s_any, self.s_any, self.s4_ne, self.s5_ne],
+            1: [[self.s_any, self.s_any, self.s_any, self.s_any, self.s4_ne, self.s5_ne],
                 [self.s0_po, self.s_any, self.s_any, self.s_any, self.s4_sm, self.s_any]]}
 
     @staticmethod
@@ -29,7 +29,6 @@ class LunarLanderRule:
     @staticmethod
     def s0_ne(x):
         return np.piecewise(x, [x > 0, (-0.05 < x) & (x <= 0), x <= -0.05],
-
                             [lambda x: 0, lambda x: -20 * x, lambda x: 1])
 
     @staticmethod
@@ -40,7 +39,7 @@ class LunarLanderRule:
     @staticmethod
     def s1_sm(x):
         return np.piecewise(x, [x > 0.7, (0 < x) & (x <= 0.7), x <= 0],
-                            [lambda x: 0, lambda x: 1 - 1 / 0.7, lambda x: 1])
+                            [lambda x: 0, lambda x: 1 - (1 / 0.7) * x, lambda x: 1])
 
     @staticmethod
     def s2_ne(x):
@@ -55,7 +54,7 @@ class LunarLanderRule:
     @staticmethod
     def s3_la(x):
         return np.piecewise(x, [x > -0.4, (-0.8 < x) & (x <= -0.4), x <= -0.8],
-                            [lambda x: 0, lambda x: -1 / 0.4 * x + 1, lambda x: 1])
+                            [lambda x: 0, lambda x: -1 / 0.4 * x - 1, lambda x: 1])
 
     @staticmethod
     def s4_ne(x):
@@ -70,7 +69,7 @@ class LunarLanderRule:
     @staticmethod
     def s4_sm(x):
         return np.piecewise(x, [x < -0.2, (-0.2 <= x) & (x < 0), (0 <= x) & (x < 0.2), (x >= 0.2)],
-                            [lambda x: 0, lambda x: 5 * x - 1, lambda x: -5 * x + 1, lambda x: 0])
+                            [lambda x: 0, lambda x: 5 * x + 1, lambda x: -5 * x + 1, lambda x: 0])
 
     @staticmethod
     def s5_ne(x):
@@ -193,4 +192,4 @@ class CartPoleRule:
 
 if __name__ == '__main__':
     rule = LunarLanderRule()
-    check(rule.s0_ne, range=2)
+    check(rule.s4_sm, range=2)
