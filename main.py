@@ -1,7 +1,7 @@
 import numpy as np
 import configargparse
 import torch
-from torch.distributions import Categorical
+from torch.distributions import Categorical, MultivariateNormal
 from tensorboardX import SummaryWriter
 from env import GymEnvironment
 from agent import PPO
@@ -40,14 +40,22 @@ def train():
     s = env.reset()
     while True:
         for i in range(config.t_horizon):
-            prob = model.actor(torch.unsqueeze(torch.from_numpy(s), 0).float().cuda())
+            if config.continuous:
+                mu = model.actor(torch.unsqueeze(torch.from_numpy(s), 0).float().cuda())
+                dist = MultivariateNormal(mu, torch.diag(model.action_var))
+                a = dist.sample()
+                prob = torch.exp(dist.log_prob(a))
+                a = a.cpu().numpy().squeeze().reshape(-1)
+            else:
+                prob = model.actor(torch.unsqueeze(torch.from_numpy(s), 0).float().cuda())
+                m = Categorical(prob)
+                a = m.sample().item()
+                prob = torch.squeeze(prob)[a]
 
-            m = Categorical(prob)
-            a = m.sample().item()
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
-            model.put_data((s, a, r / config.reward_ratio, s_prime, torch.squeeze(prob)[a].item(), done))
+            model.put_data((s, a, r / config.reward_scale, s_prime, prob.item(), done))
             s = s_prime
 
             if done:
@@ -63,7 +71,8 @@ def train():
         if update_count % config.print_interval == 0:
             if config.no_controller:
                 logger.info(
-                    "episode: {}, update count: {}, reward: {:.1f}".format(ep_count, update_count, last_ep_reward))
+                    "episode: {}, update count: {}, reward: {:.1f}".
+                        format(ep_count, update_count, last_ep_reward))
             else:
                 logger.info(
                     "episode: {}, update count: {}, reward: {:.1f}, p_cof: {:.2f}".
@@ -89,11 +98,12 @@ if __name__ == '__main__':
 
     p.add_argument('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file')
     p.add_argument('--output_dir', type=str, default='./output/', help='The name of environment')
+    p.add_argument('--continuous', default=False, action='store_true', help='Whether to use continuous action space')
 
     p.add_argument('--env', type=str, default='CartPole-v1', help='The name of environment')
     p.add_argument('--seed', type=int, default=0, help='Seed for reproducible')
     p.add_argument('--delay_step', type=int, default=1, help='Delay step for environment')
-    p.add_argument('--reward_ratio', type=int, default=100, help='The ratio of reward reduction')
+    p.add_argument('--reward_scale', type=int, default=100, help='The ratio of reward reduction')
     p.add_argument('--max_update', type=int, default=10000, help='Max update count for training')
     p.add_argument('--save_interval', type=int, default=5000, help='The save interval during training')
     p.add_argument('--k_epoch', type=int, default=3, help='Epoch per training')
@@ -105,10 +115,12 @@ if __name__ == '__main__':
     p.add_argument('--p_cof', type=float, default=0.7, help='The coefficient of the start of p')
     p.add_argument('--p_cof_end', type=float, default=0.1, help='The coefficient of the end of p')
     p.add_argument('--p_total_step', type=float, default=2000, help='The total step of p')
+    p.add_argument('--std', type=float, default=0.5, help='The value of std for continuous PPO')
     p.add_argument('--use_reward_normalization', default=False, action='store_true',
                    help='Whether to use the reward normalization')
     p.add_argument('--entropy_cof', type=float, default=0, help='The entropy coefficient for PPO')
     p.add_argument('--mse_cof', type=float, default=1, help='The MSE coefficient for PPO')
+    p.add_argument('--action_scale', type=float, default=1, help='The scale for action')
 
     p.add_argument('--print_interval', type=int, default=20, help='Print interval during training')
     p.add_argument('--no_controller', default=False, action='store_true', help='Whether to use the controller')

@@ -16,6 +16,7 @@ class GymEnvironment:
 
     def step(self, act):
         s, r, d, info = self.env.step(act)
+
         self.counter += 1
         if self.counter == self.delay_step:
             # r = self.delay_step
@@ -25,8 +26,10 @@ class GymEnvironment:
         return s, r, d, info
 
     def get_space_dim(self):
-        return self.env.observation_space.shape[0], self.env.action_space.n
+        try:
+            return self.env.observation_space.shape[0], self.env.action_space.n
+        except AttributeError:
+            return self.env.observation_space.shape[0], self.env.action_space.shape[0]
 
     def close(self):
         self.env.close()
-
