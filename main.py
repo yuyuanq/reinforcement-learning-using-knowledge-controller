@@ -24,8 +24,12 @@ def train():
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed, display_screen=False)
     else:
+        # import gym
+        # env = gym.make("LunarLanderContinuous-v2")
+        # env.seed(0)
         env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
+
     model = PPO(config, state_dim, action_dim).cuda()
 
     for name, param in model.named_parameters():
@@ -41,21 +45,22 @@ def train():
     while True:
         for i in range(config.t_horizon):
             if config.continuous:
-                mu = model.actor(torch.unsqueeze(torch.from_numpy(s), 0).float().cuda())
-                dist = MultivariateNormal(mu, torch.diag(model.action_var))
+                mu = model.actor(torch.FloatTensor(s.reshape(1, -1)).cuda())
+                cov_mat = torch.diag(model.action_var).cuda()
+                dist = MultivariateNormal(mu, cov_mat)
                 a = dist.sample()
-                prob = torch.exp(dist.log_prob(a))
-                a = a.cpu().numpy().squeeze().reshape(-1)
+                logprob = dist.log_prob(a)
+                a = a.cpu().data.numpy().flatten()
             else:
-                prob = model.actor(torch.unsqueeze(torch.from_numpy(s), 0).float().cuda())
+                prob = model.actor(torch.FloatTensor(s.reshape(1, -1)).cuda())
                 m = Categorical(prob)
                 a = m.sample().item()
-                prob = torch.squeeze(prob)[a]
+                logprob = torch.log(torch.squeeze(prob)[a])
 
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
-            model.put_data((s, a, r / config.reward_scale, s_prime, prob.item(), done))
+            model.put_data((s, a, r / config.reward_scale, s_prime, logprob.item(), done))
             s = s_prime
 
             if done:
@@ -78,10 +83,6 @@ def train():
                     "episode: {}, update count: {}, reward: {:.1f}, p_cof: {:.2f}".
                         format(ep_count, update_count, last_ep_reward, model.actor.p_cof))
 
-        # if config.log_extra and (update_count % config.log_extra_interval == 0 or update_count == 1):
-        #     if not config.no_controller:
-        #         plot_mf(model, ob_low, ob_high, writer, update_count)
-
         if update_count % config.save_interval == 0:
             torch.save(model.state_dict(), os.path.join(model_dir, 'model_{}.pkl'.format(update_count)))
 
@@ -99,7 +100,6 @@ if __name__ == '__main__':
     p.add_argument('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file')
     p.add_argument('--output_dir', type=str, default='./output/', help='The name of environment')
     p.add_argument('--continuous', default=False, action='store_true', help='Whether to use continuous action space')
-
     p.add_argument('--env', type=str, default='CartPole-v1', help='The name of environment')
     p.add_argument('--seed', type=int, default=0, help='Seed for reproducible')
     p.add_argument('--delay_step', type=int, default=1, help='Delay step for environment')
@@ -116,12 +116,10 @@ if __name__ == '__main__':
     p.add_argument('--p_cof_end', type=float, default=0.1, help='The coefficient of the end of p')
     p.add_argument('--p_total_step', type=float, default=2000, help='The total step of p')
     p.add_argument('--std', type=float, default=0.5, help='The value of std for continuous PPO')
-    p.add_argument('--use_reward_normalization', default=False, action='store_true',
-                   help='Whether to use the reward normalization')
+    p.add_argument('--no_gae', default=False, action='store_true', help='Whether to use GAE for PPO')
     p.add_argument('--entropy_cof', type=float, default=0, help='The entropy coefficient for PPO')
     p.add_argument('--mse_cof', type=float, default=1, help='The MSE coefficient for PPO')
     p.add_argument('--action_scale', type=float, default=1, help='The scale for action')
-
     p.add_argument('--print_interval', type=int, default=20, help='Print interval during training')
     p.add_argument('--no_controller', default=False, action='store_true', help='Whether to use the controller')
     p.add_argument('--log_extra', default=False, action='store_true', help='Whether to log extra information')

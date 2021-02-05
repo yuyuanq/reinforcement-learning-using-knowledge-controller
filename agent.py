@@ -27,15 +27,12 @@ class ActorContinuous(torch.nn.Module):
         self.fc1 = torch.nn.Linear(state_dim, 32)
         self.fc2 = torch.nn.Linear(32, 32)
         self.fc_mu = torch.nn.Linear(32, action_dim)
-        # self.fc_std = torch.nn.Linear(32, action_dim)
 
-    def forward(self, s, softmax_dim=1):
+    def forward(self, s):
         x = F.leaky_relu(self.fc1(s))
         x = F.leaky_relu(self.fc2(x))
         mu = self.action_scale * torch.tanh(self.fc_mu(x))
-        # std = F.softplus(self.fc_std(x))
-
-        return mu  # , std
+        return mu
 
 
 class Critic(torch.nn.Module):
@@ -96,32 +93,49 @@ class PPO(nn.Module):
 
         s, a, r, s_prime, done_mask, prob_a = torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
                                               torch.tensor(r_lst, dtype=torch.float), torch.tensor(s_prime_lst, dtype=torch.float), \
-                                              torch.tensor(done_lst, dtype=torch.float), torch.tensor(prob_a_lst)
+                                              torch.tensor(done_lst), torch.tensor(prob_a_lst)
         self.data = []
         return s, a, r, s_prime, done_mask, prob_a
 
     def train_net(self):
-        s, a, r, s_prime, done_mask, prob_a = [x.cuda() for x in self.make_batch()]
-        if self.config.use_reward_normalization:
-            r = (r - r.mean()) / (r.std() + 1e-5)
+        s, a, r, s_prime, done_mask, log_prob_a = [x.cuda() for x in self.make_batch()]
+
+        if self.config.no_gae:
+            rewards = []
+            discounted_reward = 0
+            for reward, is_not_terminal in zip(reversed(r), reversed(done_mask)):
+                if abs(is_not_terminal - 0) < 0.1:
+                    discounted_reward = 0
+                discounted_reward = reward + (self.config.gamma * discounted_reward)
+                rewards.insert(0, discounted_reward)
+
+            rewards = torch.tensor(rewards, dtype=torch.float).cuda()
+            rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
+            td_target = torch.unsqueeze(rewards, -1)
 
         for i in range(self.config.k_epoch):
-            td_target = r + self.config.gamma * self.critic(s_prime) * done_mask
-            delta = td_target - self.critic(s)
-            delta = delta.detach().cpu().numpy()
+            state_values = self.critic(s)
 
-            advantage_lst = []
-            advantage = 0.0
-            for delta_t in delta[::-1]:
-                advantage = self.config.gamma * self.config.lmbda * advantage + delta_t[0]
-                advantage_lst.append([advantage])
-            advantage_lst.reverse()
-            advantage = torch.tensor(advantage_lst, dtype=torch.float).cuda()
+            if self.config.no_gae:
+                advantage = rewards - state_values.detach()
+            else:
+                td_target = r + self.config.gamma * self.critic(s_prime) * done_mask
+                delta = td_target - state_values
+                delta = delta.detach().cpu().numpy()
+
+                advantage_lst = []
+                advantage = 0.0
+                for delta_t in delta[::-1]:
+                    advantage = self.config.gamma * self.config.lmbda * advantage + delta_t[0]
+                    advantage_lst.append([advantage])
+                advantage_lst.reverse()
+                advantage = torch.tensor(advantage_lst, dtype=torch.float).cuda()
 
             if self.config.continuous:
-                mu = self.actor(s)
-                dist = MultivariateNormal(mu, torch.diag(self.action_var))
-                a = dist.sample()
+                action_mean = self.actor(s)
+                action_var = self.action_var.expand_as(action_mean)
+                cov_mat = torch.diag_embed(action_var).cuda()
+                dist = MultivariateNormal(action_mean, cov_mat)
                 log_pi_a = dist.log_prob(a)
                 entropy = dist.entropy()
             else:
@@ -129,13 +143,12 @@ class PPO(nn.Module):
                 log_pi_a = torch.log(pi.gather(1, a))
                 entropy = Categorical(pi).entropy()
 
-            ratio = torch.exp(log_pi_a - torch.log(prob_a))
-
+            ratio = torch.exp(torch.squeeze(log_pi_a) - torch.squeeze(log_prob_a.detach()))
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.config.eps_clip, 1 + self.config.eps_clip) * advantage
 
             loss = -torch.min(surr1, surr2) + \
-                   self.config.mse_cof * self.MseLoss(self.critic(s), td_target.detach()) - \
+                   self.config.mse_cof * self.MseLoss(td_target.detach(), state_values) - \
                    self.config.entropy_cof * entropy
 
             self.optimizer.zero_grad()
