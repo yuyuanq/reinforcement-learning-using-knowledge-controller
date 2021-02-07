@@ -56,10 +56,12 @@ class PPO(nn.Module):
 
         if config.continuous:
             self.action_var = torch.full((action_dim,), self.config.std * self.config.std).cuda()
+
             if config.no_controller:
                 self.actor = ActorContinuous(state_dim, action_dim, action_scale=self.config.action_scale)
             else:
-                raise NotImplementedError
+                self.actor = Controller(state_dim, action_dim, config)
+                self.p_delta = (self.actor.p_cof - self.actor.p_cof_end) / self.actor.p_total_step
         else:
             if config.no_controller:
                 self.actor = Actor(state_dim, action_dim)

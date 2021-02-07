@@ -20,6 +20,9 @@ class GymEnvironment:
         self.steps = 0
         return s
 
+    def render(self):
+        self.env.render()
+
     def step(self, act):
         s, r, d, info = self.env.step(act)
 

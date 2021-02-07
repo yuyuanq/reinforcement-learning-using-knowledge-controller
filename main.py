@@ -27,6 +27,7 @@ def train():
         # import gym
         # env = gym.make("LunarLanderContinuous-v2")
         # env.seed(0)
+
         env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
 
@@ -59,6 +60,11 @@ def train():
 
             s_prime, r, done, info = env.step(a)
             ep_reward += r
+
+            # For debug
+            # logger.debug([s_prime, a, r])
+            # env.render()
+            # time.sleep(1/10)
 
             model.put_data((s, a, r / config.reward_scale, s_prime, logprob.item(), done))
             s = s_prime
