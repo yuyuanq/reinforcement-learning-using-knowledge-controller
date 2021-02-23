@@ -25,6 +25,8 @@ class Controller(torch.nn.Module):
             from rule.rule_lunarlander import LunarLanderRule as DesignedRule
         elif config.env == 'MountainCarContinuous-v0':
             from rule.rule_mountaincarcontinuous import MountainCarContinuousRule as DesignedRule
+        elif config.env == 'MountainCar-v0':
+            from rule.rule_mountaincar import MountainCarRule as DesignedRule
         else:
             raise ValueError
 

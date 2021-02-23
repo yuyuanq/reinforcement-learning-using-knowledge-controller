@@ -38,6 +38,8 @@ class GymEnvironment:
             self.delay_reward = 0
             self.delay_counter = 0
 
+        # print(r)
+
         return s, r, d, info
 
     def get_space_dim(self):

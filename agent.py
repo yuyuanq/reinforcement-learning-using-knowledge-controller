@@ -155,6 +155,7 @@ class PPO(nn.Module):
 
             self.optimizer.zero_grad()
             loss.mean().backward()
+            # nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
             self.optimizer.step()
 
         if not self.config.no_controller:
