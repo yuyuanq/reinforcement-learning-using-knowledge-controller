@@ -17,6 +17,7 @@ class Controller(torch.nn.Module):
         # Method 2 (human designed)
         self.rule_dict = nn.ModuleDict({str(i): nn.ModuleList() for i in range(action_dim)})
 
+        # Define different rules
         if config.env == 'CartPole-v1':
             from rule.rule_cartpole import CartPoleRule as DesignedRule
         elif config.env == 'FlappyBird':
@@ -27,6 +28,8 @@ class Controller(torch.nn.Module):
             from rule.rule_mountaincarcontinuous import MountainCarContinuousRule as DesignedRule
         elif config.env == 'MountainCar-v0':
             from rule.rule_mountaincar import MountainCarRule as DesignedRule
+        elif config.env == 'Pendulum-v0':
+            from rule.rule_pendulum import PendulumRule as DesignedRule
         else:
             raise ValueError
 
@@ -73,8 +76,14 @@ class Controller(torch.nn.Module):
 
         if self.config.continuous:
             for i in range(self.action_dim):
-                w, a = [rule(s) for rule in self.rule_dict[str(i)]]
-                w = torch.softmax(torch.cat(w, 1), 1)
+                wa = [rule(s) for rule in self.rule_dict[str(i)]]
+                w = [v[0] for v in wa]
+                a = [v[1] for v in wa]
+                w = torch.cat(w, 1)
+
+                # w = torch.softmax(torch.cat(w, 1), 1)
+                # print(w)
+
                 p_list.append(torch.sum(w * torch.cat(a, 1), 1, keepdim=True))
         else:
             for i in range(self.action_dim):

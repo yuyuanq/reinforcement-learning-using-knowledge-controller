@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from controller import Controller
-from torch.distributions import Categorical, MultivariateNormal
+from torch.distributions import Categorical, MultivariateNormal, Normal
 
 
 class Actor(torch.nn.Module):
@@ -90,12 +90,12 @@ class PPO(nn.Module):
             r_lst.append([r])
             s_prime_lst.append(s_prime)
             prob_a_lst.append([prob_a])
-            done_mask = 0 if done else 1
+            done_mask = False if done else True
             done_lst.append([done_mask])
 
         s, a, r, s_prime, done_mask, prob_a = torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
                                               torch.tensor(r_lst, dtype=torch.float), torch.tensor(s_prime_lst, dtype=torch.float), \
-                                              torch.tensor(done_lst), torch.tensor(prob_a_lst)
+                                              torch.tensor(done_lst, dtype=torch.bool), torch.tensor(prob_a_lst)
         self.data = []
         return s, a, r, s_prime, done_mask, prob_a
 
@@ -106,7 +106,7 @@ class PPO(nn.Module):
             rewards = []
             discounted_reward = 0
             for reward, is_not_terminal in zip(reversed(r), reversed(done_mask)):
-                if abs(is_not_terminal - 0) < 0.1:
+                if not is_not_terminal:
                     discounted_reward = 0
                 discounted_reward = reward + (self.config.gamma * discounted_reward)
                 rewards.insert(0, discounted_reward)
@@ -138,6 +138,7 @@ class PPO(nn.Module):
                 action_var = self.action_var.expand_as(action_mean)
                 cov_mat = torch.diag_embed(action_var).cuda()
                 dist = MultivariateNormal(action_mean, cov_mat)
+                # dist = Normal(action_mean, torch.ones_like(action_mean) * 0.5)
                 log_pi_a = dist.log_prob(a)
                 entropy = dist.entropy()
             else:
@@ -155,7 +156,8 @@ class PPO(nn.Module):
 
             self.optimizer.zero_grad()
             loss.mean().backward()
-            # nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
             self.optimizer.step()
 
         if not self.config.no_controller:

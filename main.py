@@ -1,7 +1,7 @@
 import numpy as np
 import configargparse
 import torch
-from torch.distributions import Categorical, MultivariateNormal
+from torch.distributions import Categorical, MultivariateNormal, Normal
 from tensorboardX import SummaryWriter
 from env import GymEnvironment
 from agent import PPO
@@ -49,6 +49,7 @@ def train():
                 mu = model.actor(torch.FloatTensor(s.reshape(1, -1)).cuda())
                 cov_mat = torch.diag(model.action_var).cuda()
                 dist = MultivariateNormal(mu, cov_mat)
+                # dist = Normal(mu, torch.ones_like(mu) * 0.5)
                 a = dist.sample()
                 logprob = dist.log_prob(a)
                 a = a.cpu().data.numpy().flatten()
