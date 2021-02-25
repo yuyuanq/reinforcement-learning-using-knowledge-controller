@@ -82,7 +82,7 @@ class Controller(torch.nn.Module):
                 w = torch.cat(w, 1)
 
                 # w = torch.softmax(torch.cat(w, 1), 1)
-                # print(w)
+                # print(w, a)
 
                 p_list.append(torch.sum(w * torch.cat(a, 1), 1, keepdim=True))
         else:
