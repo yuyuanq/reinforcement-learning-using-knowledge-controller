@@ -47,9 +47,9 @@ def train():
         for i in range(config.t_horizon):
             if config.continuous:
                 mu = model.actor(torch.FloatTensor(s.reshape(1, -1)).cuda())
-                cov_mat = torch.diag(model.action_var).cuda()
+                action_var = model.action_var.expand_as(mu)
+                cov_mat = torch.diag_embed(action_var).cuda()
                 dist = MultivariateNormal(mu, cov_mat)
-                # dist = Normal(mu, torch.ones_like(mu) * 0.5)
                 a = dist.sample()
                 logprob = dist.log_prob(a)
                 a = a.cpu().data.numpy().flatten()
@@ -62,7 +62,6 @@ def train():
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
-            # For debug
             # logger.debug([s_prime, a, r])
             # env.render()
             # time.sleep(1/10)
@@ -76,6 +75,8 @@ def train():
                 last_ep_reward = ep_reward
                 ep_reward = 0
                 s = env.reset()
+
+                # break
 
         model.train_net()
         update_count += 1
@@ -110,13 +111,13 @@ if __name__ == '__main__':
     p.add_argument('--env', type=str, default='CartPole-v1', help='The name of environment')
     p.add_argument('--seed', type=int, default=0, help='Seed for reproducible')
     p.add_argument('--delay_step', type=int, default=1, help='Delay step for environment')
-    p.add_argument('--reward_scale', type=int, default=100, help='The ratio of reward reduction')
+    p.add_argument('--reward_scale', type=int, default=100.0, help='The ratio of reward reduction')
     p.add_argument('--max_update', type=int, default=10000, help='Max update count for training')
     p.add_argument('--save_interval', type=int, default=5000, help='The save interval during training')
     p.add_argument('--k_epoch', type=int, default=3, help='Epoch per training')
     p.add_argument('--t_horizon', type=int, default=128, help='Max horizon per training')
     p.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate for training')
-    p.add_argument('--gamma', type=float, default=0.99, help='Discount of reward')
+    p.add_argument('--gamma', type=float, default=0.98, help='Discount of reward')
     p.add_argument('--lmbda', type=float, default=0.95, help='Discount of GAE')
     p.add_argument('--eps_clip', type=float, default=0.2, help='Clip epsilon of PPO')
     p.add_argument('--p_cof', type=float, default=0.7, help='The coefficient of the start of p')

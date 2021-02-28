@@ -56,6 +56,9 @@ class Controller(torch.nn.Module):
         self.w2_fc1 = nn.Linear(state_dim, self.hidden_num)
         self.w2_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
         self.w2_fc3 = nn.Linear(self.hidden_num, self.hidden_num * action_dim)
+        self.b2_fc1 = nn.Linear(state_dim, self.hidden_num)
+        self.b2_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
+        self.b2_fc3 = nn.Linear(self.hidden_num, action_dim)
 
         torch.nn.init.orthogonal_(self.w1_fc1.weight, 0.1)
         torch.nn.init.orthogonal_(self.w1_fc2.weight, 0.1)
@@ -66,6 +69,9 @@ class Controller(torch.nn.Module):
         torch.nn.init.orthogonal_(self.w2_fc1.weight, 0.1)
         torch.nn.init.orthogonal_(self.w2_fc2.weight, 0.1)
         torch.nn.init.orthogonal_(self.w2_fc3.weight, 0.01)
+        torch.nn.init.orthogonal_(self.b2_fc1.weight, 0.1)
+        torch.nn.init.orthogonal_(self.b2_fc2.weight, 0.1)
+        torch.nn.init.orthogonal_(self.b2_fc3.weight, 0.01)
 
         self.p_cof = config.p_cof
         self.p_cof_end = config.p_cof_end
@@ -81,9 +87,6 @@ class Controller(torch.nn.Module):
                 a = [v[1] for v in wa]
                 w = torch.cat(w, 1)
 
-                # w = torch.softmax(torch.cat(w, 1), 1)
-                # print(w, a)
-
                 p_list.append(torch.sum(w * torch.cat(a, 1), 1, keepdim=True))
         else:
             for i in range(self.action_dim):
@@ -92,19 +95,23 @@ class Controller(torch.nn.Module):
 
         p = torch.cat(p_list, 1)
 
-        # p_prime = F.leaky_relu(self.fc1(torch.cat([p.detach(), s], 1)))
-        # p_prime = F.leaky_relu(self.fc2(p_prime))
+        # p_prime = F.relu(self.fc1(torch.cat([p.detach(), s], 1)))
+        # p_prime = F.relu(self.fc2(p_prime))
         # p_prime = torch.sigmoid(self.fc3(p_prime))
 
-        w1 = self.w1_fc3(F.leaky_relu(self.w1_fc2(F.leaky_relu(self.w1_fc1(s))))) \
+        w1 = self.w1_fc3(F.relu(self.w1_fc2(F.relu(self.w1_fc1(s))))) \
             .reshape(-1, self.action_dim, self.hidden_num)
-        b1 = self.b1_fc3(F.leaky_relu(self.b1_fc2(F.leaky_relu(self.b1_fc1(s))))) \
+        b1 = self.b1_fc3(F.relu(self.b1_fc2(F.relu(self.b1_fc1(s))))) \
             .reshape(-1, 1, self.hidden_num)
-        w2 = self.w2_fc3(F.leaky_relu(self.w2_fc2(F.leaky_relu(self.w2_fc1(s))))) \
+        w2 = self.w2_fc3(F.relu(self.w2_fc2(F.relu(self.w2_fc1(s))))) \
             .reshape(-1, self.hidden_num, self.action_dim)
+        b2 = self.b2_fc3(F.relu(self.b2_fc2(F.relu(self.b2_fc1(s))))) \
+            .reshape(-1, 1, self.action_dim)
 
-        p_out = torch.bmm(F.leaky_relu(
-            torch.bmm(p.detach().reshape(-1, 1, self.action_dim), w1) + b1), w2).reshape(-1, self.action_dim)
+        # p = torch.ones_like(p).cuda() * 0.01
+
+        p_out = (torch.bmm(F.relu(
+            torch.bmm(p.detach().reshape(-1, 1, self.action_dim), w1) + b1), w2) + b2).reshape(-1, self.action_dim)
 
         if self.config.continuous:
             p_prime = self.config.action_scale * torch.tanh(p_out)
@@ -148,8 +155,8 @@ class MembershipNetwork(torch.nn.Module):
         self.dense3 = torch.nn.Linear(32, 1)
 
     def forward(self, s):
-        x = F.leaky_relu(self.dense1(s))
-        x = F.leaky_relu(self.dense2(x))
+        x = F.relu(self.dense1(s))
+        x = F.relu(self.dense2(x))
         return torch.sigmoid(self.dense3(x))
 
 
