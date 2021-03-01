@@ -14,8 +14,8 @@ class Actor(torch.nn.Module):
         self.dense3 = torch.nn.Linear(32, action_dim)
 
     def forward(self, s, softmax_dim=1):
-        x = F.relu(self.dense1(s))
-        x = F.relu(self.dense2(x))
+        x = F.leaky_relu(self.dense1(s))
+        x = F.leaky_relu(self.dense2(x))
         return F.softmax(self.dense3(x), dim=softmax_dim)
 
 
@@ -28,13 +28,9 @@ class ActorContinuous(torch.nn.Module):
         self.fc2 = torch.nn.Linear(32, 32)
         self.fc_mu = torch.nn.Linear(32, action_dim)
 
-        torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc_mu.weight, 0.01)
-
     def forward(self, s):
-        x = F.relu(self.fc1(s))
-        x = F.relu(self.fc2(x))
+        x = F.leaky_relu(self.fc1(s))
+        x = F.leaky_relu(self.fc2(x))
         mu = self.action_scale * torch.tanh(self.fc_mu(x))
         return mu
 
@@ -42,18 +38,18 @@ class ActorContinuous(torch.nn.Module):
 class Critic(torch.nn.Module):
     def __init__(self, state_dim):
         super().__init__()
-        self.dense1 = torch.nn.Linear(state_dim, 32)
-        self.dense2 = torch.nn.Linear(32, 32)
-        self.dense3 = torch.nn.Linear(32, 1)
+        self.fc1 = torch.nn.Linear(state_dim, 32)
+        self.fc2 = torch.nn.Linear(32, 32)
+        self.fc_v = torch.nn.Linear(32, 1)
 
-        torch.nn.init.orthogonal_(self.dense1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.dense2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.dense3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.dense1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.dense2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.dense3.weight, 0.01)
 
     def forward(self, s):
-        x = F.relu(self.dense1(s))
-        x = F.relu(self.dense2(x))
-        return self.dense3(x)
+        x = F.leaky_relu(self.fc1(s))
+        x = F.leaky_relu(self.fc2(x))
+        return self.fc_v(x)
 
 
 class PPO(nn.Module):
@@ -63,7 +59,7 @@ class PPO(nn.Module):
         self.data = []
 
         if config.continuous:
-            self.action_var = torch.full((action_dim,), self.config.std * self.config.std).cuda()
+            self.action_var = torch.full((action_dim,), self.config.std * self.config.std).to(config.device)
 
             if config.no_controller:
                 self.actor = ActorContinuous(state_dim, action_dim, action_scale=self.config.action_scale)
@@ -108,8 +104,8 @@ class PPO(nn.Module):
         return s, a, r, s_prime, done_mask, prob_a
 
     def train_net(self):
-        s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [x.cuda() for x in self.make_batch()]
-        mini_batch = s_.shape[0]  # // 30
+        s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [x.to(self.config.device) for x in self.make_batch()]
+        mini_batch = s_.shape[0] // (1 if not self.config.use_minibatch else self.config.minibatch)
 
         for i in range(self.config.k_epoch):
             with torch.no_grad():
@@ -122,10 +118,10 @@ class PPO(nn.Module):
                         discounted_reward = reward + (self.config.gamma * discounted_reward)
                         rewards.insert(0, discounted_reward)
 
-                    rewards = torch.tensor(rewards, dtype=torch.float).cuda()
+                    rewards = torch.tensor(rewards, dtype=torch.float).to(self.config.device)
                     rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
                     td_target_ = torch.unsqueeze(rewards, -1)
-                    advantage_ = rewards - self.critic(s_)
+                    advantage_ = torch.unsqueeze(rewards, -1) - self.critic(s_)
                 else:
                     td_target_ = r_ + self.config.gamma * self.critic(s_prime_) * done_mask_
                     delta = td_target_ - self.critic(s_)
@@ -137,20 +133,21 @@ class PPO(nn.Module):
                         advantage = self.config.gamma * self.config.lmbda * advantage + delta_t[0]
                         advantage_lst.append([advantage])
                     advantage_lst.reverse()
-                    advantage_ = torch.tensor(advantage_lst, dtype=torch.float).cuda()
+                    advantage_ = torch.tensor(advantage_lst, dtype=torch.float).to(self.config.device)
 
+            # In most cases, do not use mini batch
             for k in range(s_.shape[0] // mini_batch):
-                s = s_[mini_batch * k:mini_batch * (k + 1) - 1, :]
-                a = a_[mini_batch * k:mini_batch * (k + 1) - 1, :]
-                log_prob_a = log_prob_a_[mini_batch * k:mini_batch * (k + 1) - 1, :]
-                advantage = advantage_[mini_batch * k:mini_batch * (k + 1) - 1, :]
-                td_target = td_target_[mini_batch * k:mini_batch * (k + 1) - 1, :]
+                s = s_[mini_batch * k:mini_batch * (k + 1), :]
+                a = a_[mini_batch * k:mini_batch * (k + 1), :]
+                log_prob_a = log_prob_a_[mini_batch * k:mini_batch * (k + 1), :]
+                advantage = advantage_[mini_batch * k:mini_batch * (k + 1), :]
+                td_target = td_target_[mini_batch * k:mini_batch * (k + 1), :]
 
                 if self.config.continuous:
-                    action_mean = self.actor(s)
-                    action_var = self.action_var.expand_as(action_mean)
-                    cov_mat = torch.diag_embed(action_var).cuda()
-                    dist = MultivariateNormal(action_mean, cov_mat)
+                    mu = self.actor(s)
+                    action_var = self.action_var.expand_as(mu)
+                    cov_mat = torch.diag_embed(action_var).to(self.config.device)
+                    dist = MultivariateNormal(mu, cov_mat)
                     log_pi_a = torch.unsqueeze(dist.log_prob(a), 1)
                     entropy = dist.entropy()
                 else:

@@ -31,7 +31,7 @@ def train():
         env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
 
-    model = PPO(config, state_dim, action_dim).cuda()
+    model = PPO(config, state_dim, action_dim).to(config.device)
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -46,15 +46,16 @@ def train():
     while True:
         for i in range(config.t_horizon):
             if config.continuous:
-                mu = model.actor(torch.FloatTensor(s.reshape(1, -1)).cuda())
+                mu = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
                 action_var = model.action_var.expand_as(mu)
-                cov_mat = torch.diag_embed(action_var).cuda()
+                cov_mat = torch.diag_embed(action_var).to(config.device)
                 dist = MultivariateNormal(mu, cov_mat)
                 a = dist.sample()
+                a = torch.clamp(a, -config.action_scale, config.action_scale)
                 logprob = dist.log_prob(a)
                 a = a.cpu().data.numpy().flatten()
             else:
-                prob = model.actor(torch.FloatTensor(s.reshape(1, -1)).cuda())
+                prob = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
                 m = Categorical(prob)
                 a = m.sample().item()
                 logprob = torch.log(torch.squeeze(prob)[a])
@@ -106,6 +107,7 @@ if __name__ == '__main__':
     p = configargparse.ArgumentParser()
 
     p.add_argument('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file')
+    p.add_argument('--device', type=str, default='cpu', help='cpu or cuda:0')
     p.add_argument('--output_dir', type=str, default='./output/', help='The name of environment')
     p.add_argument('--continuous', default=False, action='store_true', help='Whether to use continuous action space')
     p.add_argument('--env', type=str, default='CartPole-v1', help='The name of environment')
@@ -132,6 +134,8 @@ if __name__ == '__main__':
     p.add_argument('--no_controller', default=False, action='store_true', help='Whether to use the controller')
     p.add_argument('--log_extra', default=False, action='store_true', help='Whether to log extra information')
     p.add_argument('--log_extra_interval', type=int, default=1000, help='The log interval during training')
+    p.add_argument('--use_minibatch', default=False, action='store_true', help='Whether to use minibatch')
+    p.add_argument('--minibatch', type=int, default=30, help='The number of minibatch')
 
     config = p.parse_args()
 

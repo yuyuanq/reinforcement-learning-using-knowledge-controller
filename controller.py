@@ -37,16 +37,15 @@ class Controller(torch.nn.Module):
         for action_id, rule_list_list in self.designed_rule_dic.items():
             for rule_list in rule_list_list:
                 self.rule_dict[str(action_id)].append(
-                    HardRuleContinuous(rule_list) if config.continuous else HardRule(rule_list))
+                    HardRuleContinuous(rule_list, self.config.device) if config.continuous else
+                    HardRule(rule_list, self.config.device))
 
         self.hidden_num = 32
 
-        # Cat network
-        # self.fc1 = nn.Linear(action_dim + state_dim, self.hidden_num)
-        # self.fc2 = nn.Linear(self.hidden_num, self.hidden_num)
-        # self.fc3 = nn.Linear(self.hidden_num, action_dim)
+        self.fc1 = nn.Linear(state_dim, self.hidden_num)
+        self.fc2 = nn.Linear(self.hidden_num, self.hidden_num)
+        self.fc3 = nn.Linear(self.hidden_num, action_dim)
 
-        # Hyper network
         self.w1_fc1 = nn.Linear(state_dim, self.hidden_num)
         self.w1_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
         self.w1_fc3 = nn.Linear(self.hidden_num, self.hidden_num * action_dim)
@@ -60,26 +59,26 @@ class Controller(torch.nn.Module):
         self.b2_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
         self.b2_fc3 = nn.Linear(self.hidden_num, action_dim)
 
-        torch.nn.init.orthogonal_(self.w1_fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.w1_fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.w1_fc3.weight, 0.01)
-        torch.nn.init.orthogonal_(self.b1_fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.b1_fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.b1_fc3.weight, 0.01)
-        torch.nn.init.orthogonal_(self.w2_fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.w2_fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.w2_fc3.weight, 0.01)
-        torch.nn.init.orthogonal_(self.b2_fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.b2_fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.b2_fc3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.w1_fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.w1_fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.w1_fc3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.b1_fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.b1_fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.b1_fc3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.w2_fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.w2_fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.w2_fc3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.b2_fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.b2_fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.b2_fc3.weight, 0.01)
 
         self.p_cof = config.p_cof
         self.p_cof_end = config.p_cof_end
         self.p_total_step = config.p_total_step
 
     def forward(self, s):
+        # Using rule to get p
         p_list = []
-
         if self.config.continuous:
             for i in range(self.action_dim):
                 wa = [rule(s) for rule in self.rule_dict[str(i)]]
@@ -95,53 +94,57 @@ class Controller(torch.nn.Module):
 
         p = torch.cat(p_list, 1)
 
-        # p_prime = F.relu(self.fc1(torch.cat([p.detach(), s], 1)))
-        # p_prime = F.relu(self.fc2(p_prime))
-        # p_prime = torch.sigmoid(self.fc3(p_prime))
+        p = torch.ones(s.shape[0], self.action_dim).to(self.config.device)
 
-        w1 = self.w1_fc3(F.relu(self.w1_fc2(F.relu(self.w1_fc1(s))))) \
+        # Method 1: Cat network
+        # h1 = F.leaky_relu(self.fc1(torch.cat([p.detach(), s], 1)))
+        # x = F.leaky_relu(self.fc1(s))
+        # x = F.leaky_relu(self.fc2(x))
+        # p_out = self.fc3(x)
+
+        # Method 2: Hyper network
+        w1 = self.w1_fc3(F.leaky_relu(self.w1_fc2(F.leaky_relu(self.w1_fc1(s))))) \
             .reshape(-1, self.action_dim, self.hidden_num)
-        b1 = self.b1_fc3(F.relu(self.b1_fc2(F.relu(self.b1_fc1(s))))) \
+        b1 = self.b1_fc3(F.leaky_relu(self.b1_fc2(F.leaky_relu(self.b1_fc1(s))))) \
             .reshape(-1, 1, self.hidden_num)
-        w2 = self.w2_fc3(F.relu(self.w2_fc2(F.relu(self.w2_fc1(s))))) \
+        w2 = self.w2_fc3(F.leaky_relu(self.w2_fc2(F.leaky_relu(self.w2_fc1(s))))) \
             .reshape(-1, self.hidden_num, self.action_dim)
-        b2 = self.b2_fc3(F.relu(self.b2_fc2(F.relu(self.b2_fc1(s))))) \
+        b2 = self.b2_fc3(F.leaky_relu(self.b2_fc2(F.leaky_relu(self.b2_fc1(s))))) \
             .reshape(-1, 1, self.action_dim)
-
-        # p = torch.ones_like(p).cuda() * 0.01
-
-        p_out = (torch.bmm(F.relu(
+        p_out = (torch.bmm(F.leaky_relu(
             torch.bmm(p.detach().reshape(-1, 1, self.action_dim), w1) + b1), w2) + b2).reshape(-1, self.action_dim)
 
         if self.config.continuous:
             p_prime = self.config.action_scale * torch.tanh(p_out)
-            return torch.squeeze(p * self.p_cof + p_prime * (1 - self.p_cof), dim=1)
+            return p * self.p_cof + p_prime * (1 - self.p_cof)
         else:
             p_prime = torch.sigmoid(p_out)
-            return torch.squeeze(F.softmax((p * self.p_cof + p_prime * (1 - self.p_cof)) / (1 / 10), dim=1))
+            return F.softmax((p * self.p_cof + p_prime * (1 - self.p_cof)) / (1 / 10))
 
 
 class HardRule(torch.nn.Module):
-    def __init__(self, rule_list):
+    def __init__(self, rule_list, device):
         super().__init__()
         self.rule_list = rule_list
         self.w_list = nn.Parameter(torch.ones((len(rule_list) + 1)))
+        self.device = device
 
     def forward(self, s):
         return self.w_list[-1] * torch.min(torch.cat(
-            [self.w_list[i] * torch.unsqueeze(torch.as_tensor(self.rule_list[i](s[:, i].cpu().numpy())), 1).cuda()
+            [self.w_list[i] * torch.unsqueeze(torch.as_tensor(self.rule_list[i](s[:, i].cpu().numpy())), 1).to(self.device)
              for i in range(len(self.rule_list))], 1), 1, keepdim=True)[0]
 
 
 class HardRuleContinuous(torch.nn.Module):
-    def __init__(self, rule_list):
+    def __init__(self, rule_list, device):
         super().__init__()
         self.rule_list = rule_list
         self.w_list = nn.Parameter(torch.ones((len(rule_list))))
+        self.device = device
 
     def forward(self, s):
         w = self.w_list[-1] * torch.min(torch.cat(
-            [self.w_list[i] * torch.unsqueeze(torch.as_tensor(self.rule_list[i](s[:, i].cpu().numpy())), 1).cuda()
+            [self.w_list[i] * torch.unsqueeze(torch.as_tensor(self.rule_list[i](s[:, i].cpu().numpy())), 1).to(self.device)
              for i in range(len(self.rule_list) - 1)], 1), 1, keepdim=True)[0]
         a = self.rule_list[-1](w)
         return w, a
@@ -155,8 +158,8 @@ class MembershipNetwork(torch.nn.Module):
         self.dense3 = torch.nn.Linear(32, 1)
 
     def forward(self, s):
-        x = F.relu(self.dense1(s))
-        x = F.relu(self.dense2(x))
+        x = F.leaky_relu(self.dense1(s))
+        x = F.leaky_relu(self.dense2(x))
         return torch.sigmoid(self.dense3(x))
 
 
@@ -170,7 +173,7 @@ class Rule(torch.nn.Module):
             self.membership_network_list.append(MembershipNetwork())
 
     def forward(self, s):
-        membership_all = torch.zeros((s.shape[0], len(self.state_id))).cuda()
+        membership_all = torch.zeros((s.shape[0], len(self.state_id))).to(self.config.device)
 
         for i in range(len(self.state_id)):
             mf = self.membership_network_list[i]
