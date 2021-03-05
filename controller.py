@@ -11,8 +11,8 @@ class Controller(torch.nn.Module):
         self.config = config
 
         # Method 1 (auto)
-        # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3])]),
-        #                                 '1': nn.ModuleList([Rule([0, 1, 2, 3])])})
+        # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)]),
+        #                                 '1': nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)])})
 
         # Method 2 (human designed)
         self.rule_dict = nn.ModuleDict({str(i): nn.ModuleList() for i in range(action_dim)})
@@ -42,9 +42,9 @@ class Controller(torch.nn.Module):
 
         self.hidden_num = 32
 
-        self.fc1 = nn.Linear(state_dim, self.hidden_num)
-        self.fc2 = nn.Linear(self.hidden_num, self.hidden_num)
-        self.fc3 = nn.Linear(self.hidden_num, action_dim)
+        # self.fc1 = nn.Linear(state_dim, self.hidden_num)
+        # self.fc2 = nn.Linear(self.hidden_num, self.hidden_num)
+        # self.fc3 = nn.Linear(self.hidden_num, action_dim)
 
         self.w1_fc1 = nn.Linear(state_dim, self.hidden_num)
         self.w1_fc2 = nn.Linear(self.hidden_num, self.hidden_num)
@@ -93,8 +93,7 @@ class Controller(torch.nn.Module):
                 p_list.append(torch.max(torch.cat(rule_list_for_action, 1), 1, keepdim=True)[0])
 
         p = torch.cat(p_list, 1)
-
-        p = torch.ones(s.shape[0], self.action_dim).to(self.config.device)
+        # p = torch.ones(s.shape[0], self.action_dim).to(self.config.device)
 
         # Method 1: Cat network
         # h1 = F.leaky_relu(self.fc1(torch.cat([p.detach(), s], 1)))
@@ -164,16 +163,17 @@ class MembershipNetwork(torch.nn.Module):
 
 
 class Rule(torch.nn.Module):
-    def __init__(self, state_id_list):
+    def __init__(self, state_id_list, device):
         super().__init__()
         self.state_id = state_id_list
+        self.device = device
 
         self.membership_network_list = nn.ModuleList()
         for i in range(len(state_id_list)):
             self.membership_network_list.append(MembershipNetwork())
 
     def forward(self, s):
-        membership_all = torch.zeros((s.shape[0], len(self.state_id))).to(self.config.device)
+        membership_all = torch.zeros((s.shape[0], len(self.state_id))).to(self.device)
 
         for i in range(len(self.state_id)):
             mf = self.membership_network_list[i]
