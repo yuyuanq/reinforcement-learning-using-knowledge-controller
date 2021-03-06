@@ -93,8 +93,7 @@ class Controller(torch.nn.Module):
                 p_list.append(torch.max(torch.cat(rule_list_for_action, 1), 1, keepdim=True)[0])
 
         p = torch.cat(p_list, 1)
-
-        p = torch.ones(s.shape[0], self.action_dim).to(self.config.device)
+        # p = torch.ones(s.shape[0], self.action_dim).to(self.config.device)
 
         # Method 1: Cat network
         # h1 = F.leaky_relu(self.fc1(torch.cat([p.detach(), s], 1)))
