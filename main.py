@@ -7,7 +7,7 @@ from env import GymEnvironment
 from agent import PPO
 import os
 from logger import logger
-from env_flappybird import FlappyBirdEnv
+from env_flappybird_kogun import FlappyBirdEnv
 import time
 
 
@@ -22,12 +22,9 @@ def train():
     writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed, display_screen=False)
+        env = FlappyBirdEnv(seed=config.seed)
+        env.step(0)
     else:
-        # import gym
-        # env = gym.make("LunarLanderContinuous-v2")
-        # env.seed(0)
-
         env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
 
@@ -63,8 +60,8 @@ def train():
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
-            # logger.debug([s_prime, a, r])
             # env.render()
+            # logger.debug([s_prime, a, r])
             # time.sleep(1/10)
 
             model.put_data((s, a, r / config.reward_scale, s_prime, logprob.item(), done))
