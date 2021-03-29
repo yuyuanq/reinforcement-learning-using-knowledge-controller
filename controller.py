@@ -24,6 +24,8 @@ class Controller(torch.nn.Module):
             from rule.rule_flappybird import FlappyBirdRule as DesignedRule
         elif config.env == 'LunarLander-v2':
             from rule.rule_lunarlander import LunarLanderRule as DesignedRule
+        elif config.env == 'LunarLanderContinuous-v2':
+            from rule.rule_lunarlandercontinuous import LunarLanderContinuousRule as DesignedRule
         elif config.env == 'MountainCarContinuous-v0':
             from rule.rule_mountaincarcontinuous import MountainCarContinuousRule as DesignedRule
         elif config.env == 'MountainCar-v0':

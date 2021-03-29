@@ -19,6 +19,7 @@ def apply_seed(seed):
 
 
 def train():
+    render = False
     writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
@@ -38,6 +39,7 @@ def train():
     ep_count = 0
     ep_reward = 0
     last_ep_reward = 0
+    sum_reward = 0
 
     s = env.reset()
     while True:
@@ -60,9 +62,10 @@ def train():
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
-            # env.render()
-            # logger.debug([s_prime, a, r])
-            # time.sleep(1/10)
+            if render:
+                env.render()
+                logger.debug([s_prime, a, r])
+                time.sleep(1/10)
 
             model.put_data((s, a, r / config.reward_scale, s_prime, logprob.item(), done))
             s = s_prime
@@ -71,6 +74,9 @@ def train():
                 ep_count += 1
                 writer.add_scalar('reward/epi_reward', ep_reward, ep_count)
                 last_ep_reward = ep_reward
+                sum_reward += last_ep_reward
+                # logger.debug(sum_reward / ep_count)
+
                 ep_reward = 0
                 s = env.reset()
 
