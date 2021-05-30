@@ -13,9 +13,9 @@ class Actor(torch.nn.Module):
         self.fc2 = torch.nn.Linear(32, 32)
         self.fc3 = torch.nn.Linear(32, action_dim)
 
-        torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc3.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.fc3.weight, 0.01)
 
     def forward(self, s, softmax_dim=1):
         x = F.leaky_relu(self.fc1(s))
@@ -32,9 +32,9 @@ class ActorContinuous(torch.nn.Module):
         self.fc2 = torch.nn.Linear(32, 32)
         self.fc_mu = torch.nn.Linear(32, action_dim)
 
-        torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc_mu.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.fc_mu.weight, 0.01)
 
     def forward(self, s):
         x = F.leaky_relu(self.fc1(s))
@@ -50,9 +50,9 @@ class Critic(torch.nn.Module):
         self.fc2 = torch.nn.Linear(32, 32)
         self.fc_v = torch.nn.Linear(32, 1)
 
-        torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        torch.nn.init.orthogonal_(self.fc_v.weight, 0.01)
+        # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
+        # torch.nn.init.orthogonal_(self.fc_v.weight, 0.01)
 
     def forward(self, s):
         x = F.leaky_relu(self.fc1(s))

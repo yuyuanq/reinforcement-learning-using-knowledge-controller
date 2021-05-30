@@ -11,6 +11,16 @@ from env_flappybird_kogun import FlappyBirdEnv
 import time
 
 
+# Single CPU
+cpu_num = 1
+os.environ['OMP_NUM_THREADS'] = str(cpu_num)
+os.environ['OPENBLAS_NUM_THREADS'] = str(cpu_num)
+os.environ['MKL_NUM_THREADS'] = str(cpu_num)
+os.environ['VECLIB_MAXIMUM_THREADS'] = str(cpu_num)
+os.environ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
+torch.set_num_threads(cpu_num)
+
+
 def apply_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -44,20 +54,21 @@ def train():
     s = env.reset()
     while True:
         for i in range(config.t_horizon):
-            if config.continuous:
-                mu = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
-                action_var = model.action_var.expand_as(mu)
-                cov_mat = torch.diag_embed(action_var).to(config.device)
-                dist = MultivariateNormal(mu, cov_mat)
-                a = dist.sample()
-                a = torch.clamp(a, -config.action_scale, config.action_scale)
-                logprob = dist.log_prob(a)
-                a = a.cpu().data.numpy().flatten()
-            else:
-                prob = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
-                m = Categorical(prob)
-                a = m.sample().item()
-                logprob = torch.log(torch.squeeze(prob)[a])
+            with torch.no_grad():
+                if config.continuous:
+                    mu = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
+                    action_var = model.action_var.expand_as(mu)
+                    cov_mat = torch.diag_embed(action_var).to(config.device)
+                    dist = MultivariateNormal(mu, cov_mat)
+                    a = dist.sample()
+                    a = torch.clamp(a, -config.action_scale, config.action_scale)
+                    logprob = dist.log_prob(a)
+                    a = a.cpu().data.numpy().flatten()
+                else:
+                    prob = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
+                    m = Categorical(prob)
+                    a = m.sample().item()
+                    logprob = torch.log(torch.squeeze(prob)[a])
 
             s_prime, r, done, info = env.step(a)
             ep_reward += r

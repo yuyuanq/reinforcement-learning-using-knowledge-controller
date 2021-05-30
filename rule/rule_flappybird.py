@@ -20,7 +20,7 @@ class FlappyBirdRule:
 
     @staticmethod
     def s0_sm(x):
-        return np.piecewise(x, [x > 2, (1.5 < x) & (x <= 1.5), x <= 1.5],
+        return np.piecewise(x, [x > 2, (1.5 < x) & (x <= 2), x <= 1.5],
                             [lambda x: 0, lambda x: -(1 / 0.5) * x + 4, lambda x: 1])
 
     @staticmethod
