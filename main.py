@@ -73,6 +73,8 @@ def train():
             s_prime, r, done, info = env.step(a)
             ep_reward += r
 
+            # env.render()
+
             if render:
                 env.render()
                 logger.debug([s_prime, a, r])

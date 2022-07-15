@@ -11,6 +11,10 @@ class CartPoleRule:
                               [self.s0_ne, self.s1_ne, self.s2_sm, self.s3_sm]]}
 
     @staticmethod
+    def s_no(x):
+        return np.piecewise(x, [x], [lambda x: 0])
+
+    @staticmethod
     def s_any(x):
         return np.piecewise(x, [x], [lambda x: 1])
 

@@ -30,7 +30,7 @@ class Controller(torch.nn.Module):
             from rule.rule_mountaincarcontinuous import MountainCarContinuousRule as DesignedRule
         elif config.env == 'MountainCar-v0':
             from rule.rule_mountaincar import MountainCarRule as DesignedRule
-        elif config.env == 'Pendulum-v0':
+        elif config.env == 'Pendulum-v0' or config.env == 'Pendulum-v1':
             from rule.rule_pendulum import PendulumRule as DesignedRule
         else:
             raise ValueError
