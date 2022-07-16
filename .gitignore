@@ -1,3 +1,7 @@
 /runs/**
 /tmp/**
-/rule/*.pdf
+*.pdf
+.idea
+__pycache__
+.vscode
+output
