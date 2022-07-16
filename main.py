@@ -1,6 +1,7 @@
 import numpy as np
 import configargparse
 import torch
+from torch import nn
 from torch.distributions import Categorical, MultivariateNormal, Normal
 from tensorboardX import SummaryWriter
 from env import GymEnvironment
@@ -9,16 +10,8 @@ import os
 from logger import logger
 from env_flappybird_kogun import FlappyBirdEnv
 import time
-
-
-# Single CPU
-cpu_num = 1
-os.environ['OMP_NUM_THREADS'] = str(cpu_num)
-os.environ['OPENBLAS_NUM_THREADS'] = str(cpu_num)
-os.environ['MKL_NUM_THREADS'] = str(cpu_num)
-os.environ['VECLIB_MAXIMUM_THREADS'] = str(cpu_num)
-os.environ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
-torch.set_num_threads(cpu_num)
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def apply_seed(seed):
@@ -30,6 +23,8 @@ def apply_seed(seed):
 
 def train():
     render = False
+    plot = False
+
     writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
@@ -40,6 +35,44 @@ def train():
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
+
+    if plot:
+        model.load_state_dict(torch.load(r".\model_30000.pkl"))
+
+        ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
+        # ob_high[1], ob_low[1] = 10, -10
+        # ob_high[3], ob_low[3] = 10, -10
+        sns.set_style("dark")
+        sns.despine(left=True)
+        plt.rcParams["font.family"] = "Times New Roman"
+
+        fig = plt.figure(figsize=(8, 4), tight_layout=True)
+        count = 1
+        # x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
+
+        for _action in model.actor.rule_dict.keys():
+            for ruleID, _rule in enumerate(model.actor.rule_dict[_action]):
+                for mfID, _membership_network in enumerate(_rule.membership_network_list):
+                    fig.add_subplot(len(model.actor.rule_dict.keys()), len(_rule.membership_network_list), count)
+                    count += 1
+
+                    state_id = _rule.state_id[mfID]
+                    x = torch.linspace(ob_low[state_id], ob_high[state_id], 100)
+                    y = torch.zeros_like(x)
+
+                    for i, _ in enumerate(x):
+                        y[i] = _membership_network(_.reshape(-1, 1).to(config.device)).item()
+
+                    plt.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
+                    plt.box(True)
+                    plt.grid(axis='y')
+                    plt.ylim([-0.05, 1.05])
+                    # plt.xlabel(x_labels[mfID], fontsize=12)
+                    if mfID == 0:
+                        plt.ylabel('Membership', fontsize=12)
+        plt.savefig('ll_auto.pdf')
+        # plt.show()
+        exit(0)
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -70,10 +103,8 @@ def train():
                     a = m.sample().item()
                     logprob = torch.log(torch.squeeze(prob)[a])
 
-            s_prime, r, done, info = env.step(a)
+            s_prime, r, done, _ = env.step(a)
             ep_reward += r
-
-            # env.render()
 
             if render:
                 env.render()
@@ -105,8 +136,8 @@ def train():
                         format(ep_count, update_count, last_ep_reward))
             else:
                 logger.info(
-                    "episode: {}, update count: {}, reward: {:.1f}, p_cof: {:.2f}".
-                        format(ep_count, update_count, last_ep_reward, model.actor.p_cof))
+                    "episode: {}, update count: {}, reward: {:.1f}".
+                        format(ep_count, update_count, last_ep_reward))
 
         if update_count % config.save_interval == 0:
             torch.save(model.state_dict(), os.path.join(model_dir, 'model_{}.pkl'.format(update_count)))

@@ -20,7 +20,7 @@ class Actor(torch.nn.Module):
     def forward(self, s, softmax_dim=1):
         x = F.leaky_relu(self.fc1(s))
         x = F.leaky_relu(self.fc2(x))
-        return F.softmax(self.fc3(x), dim=softmax_dim)
+        return F.softmax(self.fc3(x) * 10, dim=softmax_dim)
 
 
 class ActorContinuous(torch.nn.Module):
@@ -46,9 +46,9 @@ class ActorContinuous(torch.nn.Module):
 class Critic(torch.nn.Module):
     def __init__(self, state_dim):
         super().__init__()
-        self.fc1 = torch.nn.Linear(state_dim, 32)
-        self.fc2 = torch.nn.Linear(32, 32)
-        self.fc_v = torch.nn.Linear(32, 1)
+        self.fc1 = torch.nn.Linear(state_dim, 64)
+        self.fc2 = torch.nn.Linear(64, 64)
+        self.fc_v = torch.nn.Linear(64, 1)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
         # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
@@ -79,12 +79,15 @@ class PPO(nn.Module):
                 self.actor = Actor(state_dim, action_dim)
             else:
                 self.actor = Controller(state_dim, action_dim, config)
-                self.p_delta = (self.actor.p_cof - self.actor.p_cof_end) / self.actor.p_total_step
 
         self.critic = Critic(state_dim)
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
         self.MseLoss = nn.SmoothL1Loss()
+
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                nn.init.xavier_uniform_(m.weight)
 
     def put_data(self, transition):
         self.data.append(transition)
@@ -176,6 +179,3 @@ class PPO(nn.Module):
                 loss.mean().backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 0.5)
                 self.optimizer.step()
-
-        if not self.config.no_controller:
-            self.actor.p_cof = max(self.actor.p_cof - self.p_delta, self.actor.p_cof_end)
