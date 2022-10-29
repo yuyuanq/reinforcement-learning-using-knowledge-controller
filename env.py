@@ -2,6 +2,7 @@ import gym
 
 
 class GymEnvironment:
+
     def __init__(self, env_name, delay_step=1, seed=0, max_steps=1500):
         assert delay_step > 0
 
@@ -46,7 +47,8 @@ class GymEnvironment:
         try:
             return self.env.observation_space.shape[0], self.env.action_space.n
         except AttributeError:
-            return self.env.observation_space.shape[0], self.env.action_space.shape[0]
+            return self.env.observation_space.shape[
+                0], self.env.action_space.shape[0]
 
     def close(self):
         self.env.close()
