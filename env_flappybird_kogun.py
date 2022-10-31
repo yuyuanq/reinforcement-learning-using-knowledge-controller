@@ -19,7 +19,7 @@ class FlappyBirdEnv:
         state_list = state_list[:5]
         state_list[3] = state_list[0] - state_list[3]
         state_list[4] = state_list[0] - state_list[4]
-        return np.array(state_list)
+        return np.array(state_list) / 100
 
     def reset(self):
         self.p.init()

@@ -7,6 +7,7 @@ from torch.distributions import Categorical, MultivariateNormal, Normal
 
 
 class Actor(torch.nn.Module):
+
     def __init__(self, state_dim, action_dim):
         super().__init__()
         self.fc1 = torch.nn.Linear(state_dim, 32)
@@ -18,12 +19,13 @@ class Actor(torch.nn.Module):
         # torch.nn.init.orthogonal_(self.fc3.weight, 0.01)
 
     def forward(self, s, softmax_dim=1):
-        x = F.leaky_relu(self.fc1(s))
-        x = F.leaky_relu(self.fc2(x))
+        x = F.relu(self.fc1(s))
+        x = F.relu(self.fc2(x))
         return F.softmax(self.fc3(x) * 10, dim=softmax_dim)
 
 
 class ActorContinuous(torch.nn.Module):
+
     def __init__(self, state_dim, action_dim, action_scale=1):
         super().__init__()
         self.action_scale = action_scale
@@ -37,43 +39,49 @@ class ActorContinuous(torch.nn.Module):
         # torch.nn.init.orthogonal_(self.fc_mu.weight, 0.01)
 
     def forward(self, s):
-        x = F.leaky_relu(self.fc1(s))
-        x = F.leaky_relu(self.fc2(x))
+        x = F.relu(self.fc1(s))
+        x = F.relu(self.fc2(x))
         mu = self.action_scale * torch.tanh(self.fc_mu(x))
         return mu
 
 
 class Critic(torch.nn.Module):
+
     def __init__(self, state_dim):
         super().__init__()
-        self.fc1 = torch.nn.Linear(state_dim, 64)
-        self.fc2 = torch.nn.Linear(64, 64)
-        self.fc_v = torch.nn.Linear(64, 1)
+        self.fc1 = torch.nn.Linear(state_dim, 32)
+        self.fc2 = torch.nn.Linear(32, 32)
+        self.fc_v = torch.nn.Linear(32, 1)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
         # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
         # torch.nn.init.orthogonal_(self.fc_v.weight, 0.01)
 
     def forward(self, s):
-        x = F.leaky_relu(self.fc1(s))
-        x = F.leaky_relu(self.fc2(x))
+        x = F.relu(self.fc1(s))
+        x = F.relu(self.fc2(x))
         return self.fc_v(x)
 
 
 class PPO(nn.Module):
+
     def __init__(self, config, state_dim, action_dim):
         super(PPO, self).__init__()
         self.config = config
         self.data = []
 
         if config.continuous:
-            self.action_var = torch.full((action_dim,), self.config.std * self.config.std).to(config.device)
+            self.action_var = torch.full(
+                (action_dim, ),
+                self.config.std * self.config.std).to(config.device)
 
             if config.no_controller:
-                self.actor = ActorContinuous(state_dim, action_dim, action_scale=self.config.action_scale)
+                self.actor = ActorContinuous(
+                    state_dim,
+                    action_dim,
+                    action_scale=self.config.action_scale)
             else:
                 self.actor = Controller(state_dim, action_dim, config)
-                self.p_delta = (self.actor.p_cof - self.actor.p_cof_end) / self.actor.p_total_step
         else:
             if config.no_controller:
                 self.actor = Actor(state_dim, action_dim)
@@ -82,7 +90,8 @@ class PPO(nn.Module):
 
         self.critic = Critic(state_dim)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=self.config.learning_rate)
+        self.optimizer = optim.Adam(self.parameters(),
+                                    lr=self.config.learning_rate)
         self.MseLoss = nn.SmoothL1Loss()
 
         for m in self.modules():
@@ -115,49 +124,62 @@ class PPO(nn.Module):
         return s, a, r, s_prime, done_mask, prob_a
 
     def train_net(self):
-        s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [x.to(self.config.device) for x in self.make_batch()]
-        mini_batch = s_.shape[0] // (1 if not self.config.use_minibatch else self.config.minibatch)
+        s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [
+            x.to(self.config.device) for x in self.make_batch()
+        ]
+        mini_batch = s_.shape[0] // (1 if not self.config.use_minibatch else
+                                     self.config.minibatch)
 
         for i in range(self.config.k_epoch):
             with torch.no_grad():
                 if self.config.no_gae:
                     rewards = []
                     discounted_reward = 0
-                    for reward, is_not_terminal in zip(reversed(r_), reversed(done_mask_)):
+                    for reward, is_not_terminal in zip(reversed(r_),
+                                                       reversed(done_mask_)):
                         if not is_not_terminal:
                             discounted_reward = 0
-                        discounted_reward = reward + (self.config.gamma * discounted_reward)
+                        discounted_reward = reward + (self.config.gamma *
+                                                      discounted_reward)
                         rewards.insert(0, discounted_reward)
 
-                    rewards = torch.tensor(rewards, dtype=torch.float).to(self.config.device)
-                    rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
+                    rewards = torch.tensor(rewards, dtype=torch.float).to(
+                        self.config.device)
+                    rewards = (rewards - rewards.mean()) / (rewards.std() +
+                                                            1e-5)
                     td_target_ = torch.unsqueeze(rewards, -1)
                     advantage_ = torch.unsqueeze(rewards, -1) - self.critic(s_)
                 else:
-                    td_target_ = r_ + self.config.gamma * self.critic(s_prime_) * done_mask_
+                    td_target_ = r_ + self.config.gamma * self.critic(
+                        s_prime_) * done_mask_
                     delta = td_target_ - self.critic(s_)
                     delta = delta.cpu().numpy()
 
                     advantage_lst = []
                     advantage = 0.0
                     for delta_t in delta[::-1]:
-                        advantage = self.config.gamma * self.config.lmbda * advantage + delta_t[0]
+                        advantage = self.config.gamma * self.config.lmbda * advantage + delta_t[
+                            0]
                         advantage_lst.append([advantage])
                     advantage_lst.reverse()
-                    advantage_ = torch.tensor(advantage_lst, dtype=torch.float).to(self.config.device)
+                    advantage_ = torch.tensor(advantage_lst,
+                                              dtype=torch.float).to(
+                                                  self.config.device)
 
             # In most cases, do not use mini batch
             for k in range(s_.shape[0] // mini_batch):
                 s = s_[mini_batch * k:mini_batch * (k + 1), :]
                 a = a_[mini_batch * k:mini_batch * (k + 1), :]
-                log_prob_a = log_prob_a_[mini_batch * k:mini_batch * (k + 1), :]
+                log_prob_a = log_prob_a_[mini_batch * k:mini_batch *
+                                         (k + 1), :]
                 advantage = advantage_[mini_batch * k:mini_batch * (k + 1), :]
                 td_target = td_target_[mini_batch * k:mini_batch * (k + 1), :]
 
                 if self.config.continuous:
                     mu = self.actor(s)
                     action_var = self.action_var.expand_as(mu)
-                    cov_mat = torch.diag_embed(action_var).to(self.config.device)
+                    cov_mat = torch.diag_embed(action_var).to(
+                        self.config.device)
                     dist = MultivariateNormal(mu, cov_mat)
                     log_pi_a = torch.unsqueeze(dist.log_prob(a), 1)
                     entropy = dist.entropy()
@@ -169,7 +191,8 @@ class PPO(nn.Module):
                 ratio = torch.exp(log_pi_a - log_prob_a)
 
                 surr1 = ratio * advantage
-                surr2 = torch.clamp(ratio, 1 - self.config.eps_clip, 1 + self.config.eps_clip) * advantage
+                surr2 = torch.clamp(ratio, 1 - self.config.eps_clip,
+                                    1 + self.config.eps_clip) * advantage
 
                 loss = -torch.min(surr1, surr2) + \
                        self.config.mse_cof * self.MseLoss(td_target, self.critic(s)) - \
