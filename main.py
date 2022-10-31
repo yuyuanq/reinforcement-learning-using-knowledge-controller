@@ -10,6 +10,7 @@ from logger import logger
 from env_flappybird_kogun import FlappyBirdEnv
 import time
 import wandb
+import pickle
 
 
 # Single CPU
@@ -27,6 +28,84 @@ def apply_seed(seed):
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def collect_buffer(n=1000):
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed,
+                             delay_step=config.delay_step)
+    state_dim, action_dim = env.get_space_dim()
+
+    model = PPO(config, state_dim, action_dim).to(config.device)
+
+    # for cp
+    model.load_state_dict(
+        torch.load(
+            r".\output\FlappyBird\False\2022-10-31-19-53-53\model\model_1202.pkl"
+        ))
+    buffer_name = 'flappybird_buffer_dict'
+
+    ep_reward = 0
+    s = env.reset()
+
+    buffer_dict = {'s': {}, 'a': {}}
+
+    for epi in range(n):
+        s_lst = []
+        a_lst = []
+
+        while True:
+            with torch.no_grad():
+                if config.continuous:
+                    mu = model.actor(
+                        torch.as_tensor(s.reshape(1, -1),
+                                        dtype=torch.float).to(config.device))
+                    action_var = model.action_var.expand_as(mu)
+                    cov_mat = torch.diag_embed(action_var).to(config.device)
+                    dist = MultivariateNormal(mu, cov_mat)
+                    a = dist.sample()
+                    a = torch.clamp(a, -config.action_scale,
+                                    config.action_scale)
+                    logprob = dist.log_prob(a)
+                    a = a.cpu().data.numpy().flatten()
+                else:
+                    prob = model.actor(
+                        torch.as_tensor(s.reshape(1, -1),
+                                        dtype=torch.float).to(config.device))
+                    m = Categorical(prob)
+                    a = m.sample().item()
+                    logprob = torch.log(torch.squeeze(prob)[a])
+
+            s_prime, r, done, _ = env.step(a)
+            s_lst.append(s)
+            a_lst.append(a)
+
+            ep_reward += r
+
+            # env.render()
+
+            s = s_prime
+
+            if done:
+                if ep_reward > 10:  #* reward threshold
+                    buffer_dict['s'][epi] = s_lst
+                    buffer_dict['a'][epi] = a_lst
+
+                print('epi: {} | ep_reward: {}'.format(epi, ep_reward))
+                ep_reward = 0
+                s = env.reset()
+                done = False
+
+                break
+
+    with open('./buffer/' + buffer_name + '.pkl', 'wb') as f:
+        pickle.dump(buffer_dict, f, pickle.HIGHEST_PROTOCOL)
+
+    env.close()
 
 
 def train():
@@ -134,16 +213,18 @@ def train():
                     .format(ep_count, update_count, last_ep_reward, steps,
                             model.actor.p_cof))
 
-        if update_count % config.save_interval == 0:
+        if update_count_eq % config.save_interval == 0:
             torch.save(
                 model.state_dict(),
-                os.path.join(model_dir, 'model_{}.pkl'.format(update_count)))
+                os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
 
         writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
 
-        if update_count_eq >= config.max_update:  # TODO
+        if update_count_eq >= config.max_update:
             break
-
+    
+    torch.save(model.state_dict(),
+               os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
     env.close()
 
 
@@ -284,3 +365,4 @@ if __name__ == '__main__':
 
     apply_seed(config.seed)
     train()
+    # collect_buffer(100)

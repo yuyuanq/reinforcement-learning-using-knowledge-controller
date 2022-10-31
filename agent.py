@@ -5,7 +5,7 @@ import torch.optim as optim
 from controller import Controller
 from torch.distributions import Categorical, MultivariateNormal, Normal
 
-HIDDEN_SIZE = 128  #*
+HIDDEN_SIZE = 32  #*
 
 class Actor(torch.nn.Module):
 
