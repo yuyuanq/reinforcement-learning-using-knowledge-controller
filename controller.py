@@ -92,12 +92,15 @@ class Controller(torch.nn.Module):
                 rule_list_for_action = [
                     rule(s) for rule in self.rule_dict[str(i)]
                 ]
+
                 p_list.append(
                     torch.max(torch.cat(rule_list_for_action, 1),
                               1,
                               keepdim=True)[0])
 
         p = torch.cat(p_list, 1)
+        
+        # print(p)
         # p = torch.ones(s.shape[0], self.action_dim).to(self.config.device)
 
         # Method 1: Cat network

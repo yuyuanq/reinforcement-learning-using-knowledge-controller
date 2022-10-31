@@ -41,7 +41,7 @@ def train():
     writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed)
+        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
         env.step(0)
     else:
         env = GymEnvironment(env_name=config.env,
@@ -89,6 +89,9 @@ def train():
 
             s_prime, r, done, _ = env.step(a)
             ep_reward += r
+
+            # time.sleep(1 / 2)
+            # print(s, a)
 
             # env.render()
 

@@ -5,14 +5,15 @@ import torch.optim as optim
 from controller import Controller
 from torch.distributions import Categorical, MultivariateNormal, Normal
 
+HIDDEN_SIZE = 128  #*
 
 class Actor(torch.nn.Module):
 
     def __init__(self, state_dim, action_dim):
         super().__init__()
-        self.fc1 = torch.nn.Linear(state_dim, 32)
-        self.fc2 = torch.nn.Linear(32, 32)
-        self.fc3 = torch.nn.Linear(32, action_dim)
+        self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
+        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        self.fc3 = torch.nn.Linear(HIDDEN_SIZE, action_dim)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
         # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
@@ -30,9 +31,9 @@ class ActorContinuous(torch.nn.Module):
         super().__init__()
         self.action_scale = action_scale
 
-        self.fc1 = torch.nn.Linear(state_dim, 32)
-        self.fc2 = torch.nn.Linear(32, 32)
-        self.fc_mu = torch.nn.Linear(32, action_dim)
+        self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
+        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        self.fc_mu = torch.nn.Linear(HIDDEN_SIZE, action_dim)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
         # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
@@ -49,9 +50,9 @@ class Critic(torch.nn.Module):
 
     def __init__(self, state_dim):
         super().__init__()
-        self.fc1 = torch.nn.Linear(state_dim, 32)
-        self.fc2 = torch.nn.Linear(32, 32)
-        self.fc_v = torch.nn.Linear(32, 1)
+        self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
+        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        self.fc_v = torch.nn.Linear(HIDDEN_SIZE, 1)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
         # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
