@@ -17,7 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 import pickle
 from torch import optim, nn
 from torch.autograd import Variable
-
+from tqdm import tqdm
 
 class SADataset(Dataset):
 
@@ -25,8 +25,14 @@ class SADataset(Dataset):
         self.s_list = []
         self.a_list = []
 
-        for i in range(len(buffer_dict['s'])):
+        keys = list(buffer_dict['s'].keys())
+
+        # if len(keys) > 100:
+        #     keys = keys[:100]
+        
+        for i in keys:
             for j in range(len(buffer_dict['s'][i])):
+
                 self.s_list.append(buffer_dict['s'][i][j])
                 self.a_list.append(buffer_dict['a'][i][j])
 
@@ -125,18 +131,9 @@ def collect_buffer(n=1000):
     env.close()
 
 
-def train():
-    wandb.init(
-        project='knowledge-rl',
-        name=f'seed_{config.seed}',
-        group=f'{config.env}_Auto_{config.info}',
-        dir='./output',
-    )
-
-    render = False
-    plot = False
-
-    writer = SummaryWriter(log_dir=log_dir)
+def plot():
+    buffer_name = 'cartpole_buffer_dict'
+    # buffer_name = 'flappybird_buffer_dict'
 
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed)
@@ -149,148 +146,61 @@ def train():
 
     model = PPO(config, state_dim, action_dim).to(config.device)
 
-    if plot:
-        model.load_state_dict(torch.load(r".\model_30000.pkl"))
+    model.load_state_dict(torch.load('./buffer/' + buffer_name + '_model_best.pkl'))
 
+    if config.env == 'FlappyBird':
+        ob_high = [300, 15, 300, 40, 60]
+        ob_low = [100, -15, 0, -60, -40]
+    else:
         ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
-        # ob_high[1], ob_low[1] = 10, -10
-        # ob_high[3], ob_low[3] = 10, -10
-        sns.set_style("dark")
-        sns.despine(left=True)
-        plt.rcParams["font.family"] = "Times New Roman"
+        ob_high[1], ob_low[1] = 10, -10
+        ob_high[3], ob_low[3] = 10, -10
 
-        fig = plt.figure(figsize=(8, 4), tight_layout=True)
-        count = 1
-        # x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
+    sns.set_style("dark")
+    sns.despine(left=True)
+    plt.rcParams["font.family"] = "Times New Roman"
 
-        for _action in model.actor.rule_dict.keys():
-            for ruleID, _rule in enumerate(model.actor.rule_dict[_action]):
-                for mfID, _membership_network in enumerate(
-                        _rule.membership_network_list):
-                    fig.add_subplot(len(model.actor.rule_dict.keys()),
-                                    len(_rule.membership_network_list), count)
-                    count += 1
+    fig = plt.figure(figsize=(8, 4), tight_layout=True)
+    count = 1
+    # x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
 
-                    state_id = _rule.state_id[mfID]
-                    x = torch.linspace(ob_low[state_id], ob_high[state_id],
-                                       100)
-                    y = torch.zeros_like(x)
+    for _action in model.actor.rule_dict.keys():
+        for _, _rule in enumerate(model.actor.rule_dict[_action]):
+            for mfID, _membership_network in enumerate(
+                    _rule.membership_network_list):
+                fig.add_subplot(len(model.actor.rule_dict.keys()),
+                                len(_rule.membership_network_list), count)
+                count += 1
 
-                    for i, _ in enumerate(x):
-                        y[i] = _membership_network(
-                            _.reshape(-1, 1).to(config.device)).item()
+                state_id = _rule.state_id[mfID]
+                x = torch.linspace(ob_low[state_id], ob_high[state_id], 100)
+                y = torch.zeros_like(x)
 
-                    plt.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
-                    plt.box(True)
-                    plt.grid(axis='y')
-                    plt.ylim([-0.05, 1.05])
-                    # plt.xlabel(x_labels[mfID], fontsize=12)
-                    if mfID == 0:
-                        plt.ylabel('Membership', fontsize=12)
-        plt.savefig('ll_auto.pdf')
-        # plt.show()
-        exit(0)
+                for i, _ in enumerate(x):
+                    y[i] = _membership_network(
+                        _.reshape(-1, 1).to(config.device)).item()
 
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            logger.debug('%s: %s' % (name, param.size()))
+                plt.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
+                plt.box(True)
+                plt.grid(axis='y')
+                plt.ylim([-0.05, 1.05])
+                # plt.xlabel(x_labels[mfID], fontsize=12)
 
-    update_count = 0
-    update_count_eq = 0
-    ep_count = 0
-    ep_reward = 0
-    last_ep_reward = 0
+                if mfID == 0:
+                    plt.ylabel('Membership', fontsize=12)
 
-    s = env.reset()
-    steps = 0
-
-    while True:
-        for _ in range(config.t_horizon**10):  # TODO
-            with torch.no_grad():
-                if config.continuous:
-                    mu = model.actor(
-                        torch.as_tensor(s.reshape(1, -1),
-                                        dtype=torch.float).to(config.device))
-                    action_var = model.action_var.expand_as(mu)
-                    cov_mat = torch.diag_embed(action_var).to(config.device)
-                    dist = MultivariateNormal(mu, cov_mat)
-                    a = dist.sample()
-                    a = torch.clamp(a, -config.action_scale,
-                                    config.action_scale)
-                    logprob = dist.log_prob(a)
-                    a = a.cpu().data.numpy().flatten()
-                else:
-                    prob = model.actor(
-                        torch.as_tensor(s.reshape(1, -1),
-                                        dtype=torch.float).to(config.device))
-                    m = Categorical(prob)
-                    a = m.sample().item()
-                    logprob = torch.log(torch.squeeze(prob)[a])
-
-            s_prime, r, done, _ = env.step(a)
-            ep_reward += r
-
-            # env.render()
-
-            if render:
-                env.render()
-                logger.debug([s_prime, a, r])
-                time.sleep(1 / 10)
-
-            model.put_data(
-                (s, a, r / config.reward_scale, s_prime, logprob.item(), done))
-            s = s_prime
-
-            steps += 1
-            if steps % config.t_horizon == 0:
-                update_count_eq += 1
-
-            if done:
-                ep_count += 1
-                writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
-                wandb.log({
-                    'ep_reward': ep_reward,
-                    'ep_count': ep_count,
-                    'steps': steps,
-                    'update_count_eq': steps // config.t_horizon
-                })
-                last_ep_reward = ep_reward
-                ep_reward = 0
-                s = env.reset()
-                done = False
-
-                break
-
-        model.train_net()
-        update_count += 1
-
-        if update_count % config.print_interval == 0:
-            if config.no_controller:
-                logger.info(
-                    "episode: {}, update count: {}, reward: {:.1f}, steps:{}".
-                    format(ep_count, update_count, last_ep_reward, steps))
-            else:
-                logger.info(
-                    "episode: {}, update count: {}, reward: {:.1f}, steps:{}".
-                    format(ep_count, update_count, last_ep_reward, steps))
-
-        if update_count % config.save_interval == 0:
-            torch.save(
-                model.state_dict(),
-                os.path.join(model_dir, 'model_{}.pkl'.format(update_count)))
-
-        writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
-
-        if update_count_eq >= config.max_update:  # TODO
-            break
-
-    env.close()
+    # plt.savefig('auto_cartpole.pdf')
+    plt.show()
 
 
 def evaluate(model):
-    env = GymEnvironment(env_name=config.env,
-                         seed=config.seed,
-                         delay_step=config.delay_step)
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed,
+                             delay_step=config.delay_step)
 
     score = 0.0
     n = 10
@@ -321,18 +231,23 @@ def evaluate(model):
 
 def train_using_buffer():
     buffer_name = 'cartpole_buffer_dict'
+    # buffer_name = 'flappybird_buffer_dict'
 
     with open('./buffer/' + buffer_name + '.pkl', 'rb') as f:
         buffer_dict = pickle.load(f)
 
     sa_dataset = SADataset(buffer_dict)
-    train_loader = DataLoader(dataset=sa_dataset, batch_size=128, shuffle=True)
+    train_loader = DataLoader(dataset=sa_dataset, batch_size=64, shuffle=True)
 
-    env = GymEnvironment(env_name=config.env,
-                         seed=config.seed,
-                         delay_step=config.delay_step)
-
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed,
+                             delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
+
     model = PPO(config, state_dim, action_dim).to(config.device)
 
     criterion = nn.CrossEntropyLoss()
@@ -341,7 +256,7 @@ def train_using_buffer():
     best = -np.inf
 
     for epoch in range(1000):
-        for _, data in enumerate(train_loader):
+        for _, data in tqdm(enumerate(train_loader)):
             s, a = data
 
             s = Variable(s)
@@ -361,7 +276,7 @@ def train_using_buffer():
         if res > best:
             torch.save(
                 model.state_dict(),
-                os.path.join('./buffer', buffer_name + '_model_best.pkl'))
+                os.path.join('./buffer', buffer_name + '_model_best_b64_lrelu_n32.pkl'))
             best = res
             print('saved')
 
@@ -504,3 +419,4 @@ if __name__ == '__main__':
     # train()
     # collect_buffer()
     train_using_buffer()
+    # plot()

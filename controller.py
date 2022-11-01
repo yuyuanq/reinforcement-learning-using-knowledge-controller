@@ -24,6 +24,14 @@ class Controller(torch.nn.Module):
             nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)])
         })
 
+        # for fb
+        # self.rule_dict = nn.ModuleDict({
+        #     '0':
+        #     nn.ModuleList([Rule([0, 1, 2, 3, 4], self.config.device)]),
+        #     '1':
+        #     nn.ModuleList([Rule([0, 1, 2, 3, 4], self.config.device)])
+        # })
+
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.xavier_uniform_(m.weight)
@@ -38,19 +46,19 @@ class Controller(torch.nn.Module):
             ]
             strength_all[:, i] = torch.max(torch.cat(rule_list_for_action, 1),
                                            1)[0]  # max
-        return F.softmax(strength_all * 10, dim=1)
+        return F.softmax(strength_all * 5, dim=1)
 
 
 class MembershipNetwork(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = torch.nn.Linear(1, 4)
-        self.fc2 = torch.nn.Linear(4, 4)
-        self.fc3 = torch.nn.Linear(4, 1)
+        self.fc1 = torch.nn.Linear(1, 32)
+        self.fc2 = torch.nn.Linear(32, 32)
+        self.fc3 = torch.nn.Linear(32, 1)
 
     def forward(self, s):
-        x = F.relu(self.fc1(s))
-        x = F.relu(self.fc2(x))
+        x = F.leaky_relu(self.fc1(s))
+        x = F.leaky_relu(self.fc2(x))
         x = torch.sigmoid(self.fc3(x))
 
         return x
