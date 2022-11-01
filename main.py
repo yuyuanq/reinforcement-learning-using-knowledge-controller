@@ -45,9 +45,16 @@ def collect_buffer(n=1000):
     # for cp
     model.load_state_dict(
         torch.load(
-            r".\output\FlappyBird\False\2022-10-31-19-53-53\model\model_1202.pkl"
+            r".\output\CartPole-v1\True\2022-10-20-23-00-29\model\model_4000.pkl"
         ))
-    buffer_name = 'flappybird_buffer_dict'
+    buffer_name = 'cartpole_buffer_dict'
+
+    # for fb
+    # model.load_state_dict(
+    #     torch.load(
+    #         r".\output\FlappyBird\False\2022-10-31-19-53-53\model\model_1202.pkl"
+    #     ))
+    # buffer_name = 'flappybird_buffer_dict'
 
     ep_reward = 0
     s = env.reset()
