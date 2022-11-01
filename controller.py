@@ -12,11 +12,6 @@ class Controller(torch.nn.Module):
         self.config = config
 
         # For cp
-        # self.rule_dict = nn.ModuleDict({'0': nn.ModuleList([Rule([0, 1, 2, 3], self.config.device),
-        #                                                     Rule([0, 1, 2, 3], self.config.device)]),
-        #                                 '1': nn.ModuleList([Rule([0, 1, 2, 3], self.config.device),
-        #                                                     Rule([0, 1, 2, 3], self.config.device)])})
-
         self.rule_dict = nn.ModuleDict({
             '0':
             nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)]),
@@ -31,6 +26,19 @@ class Controller(torch.nn.Module):
         #     '1':
         #     nn.ModuleList([Rule([0, 1, 2, 3, 4], self.config.device)])
         # })
+
+        # for ll
+        # self.rule_dict = nn.ModuleDict({
+        #     '0':
+        #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)]),
+        #     '1':
+        #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)]),
+        #     '2':
+        #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)]),
+        #     '3':
+        #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)])
+        # })
+
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):

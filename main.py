@@ -67,11 +67,11 @@ def collect_buffer(n=1000):
     model = PPO(config, state_dim, action_dim).to(config.device)
 
     # for cp
-    # model.load_state_dict(
-    #     torch.load(
-    #         r".\output\CartPole-v1\True\2022-10-20-23-00-29\model\model_4000.pkl"
-    #     ))
-    # buffer_name = 'cartpole_buffer_dict'
+    model.load_state_dict(
+        torch.load(
+            r".\output\CartPole-v1\True\2022-10-20-23-00-29\model\model_4000.pkl"
+        ))
+    buffer_name = 'cartpole_buffer_dict'
 
     # for fb
     # model.load_state_dict(
@@ -81,11 +81,11 @@ def collect_buffer(n=1000):
     # buffer_name = 'flappybird_buffer_dict'
 
     # for ll
-    model.load_state_dict(
-        torch.load(
-            r".\output\LunarLander-v2\True\2022-10-31-15-54-19\model\model_14000.pkl"
-        ))
-    buffer_name = 'lunarLander_buffer_dict'
+    # model.load_state_dict(
+    #     torch.load(
+    #         r".\output\LunarLander-v2\True\2022-10-31-15-54-19\model\model_14000.pkl"
+    #     ))
+    # buffer_name = 'lunarLander_buffer_dict'
 
     ep_reward = 0
     s = env.reset()
@@ -149,6 +149,7 @@ def collect_buffer(n=1000):
 def plot():
     buffer_name = 'cartpole_buffer_dict'
     # buffer_name = 'flappybird_buffer_dict'
+    # buffer_name = 'lunarLander_buffer_dict'
 
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed)
@@ -165,11 +166,14 @@ def plot():
 
     if config.env == 'FlappyBird':
         ob_high = [300, 15, 300, 40, 60]
-        ob_low = [100, -15, 0, -60, -40]
-    else:
+        ob_low = [100, -15, 10, -60, -40]
+    elif config.env == 'CartPole-v1':
         ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
         ob_high[1], ob_low[1] = 10, -10
         ob_high[3], ob_low[3] = 10, -10
+    elif config.env == 'LunarLander-v2':
+        ob_high = [1, 1.5, 1, 1, 1, 1, 1, 1]
+        ob_low = [-1, 0, -1, -1, -1, -1, 0, 0]
 
     sns.set_style("dark")
     sns.despine(left=True)
@@ -178,6 +182,7 @@ def plot():
     fig = plt.figure(figsize=(8, 4), tight_layout=True)
     count = 1
     # x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
+    # x_labels = ['Position', 'Velocity', 'DistenceToNext', 'PositionT', 'PositionB']
 
     for _action in model.actor.rule_dict.keys():
         for _, _rule in enumerate(model.actor.rule_dict[_action]):
@@ -204,7 +209,7 @@ def plot():
                 if mfID == 0:
                     plt.ylabel('Membership', fontsize=12)
 
-    # plt.savefig('auto_cartpole.pdf')
+    plt.savefig(f'./buffer/auto_{buffer_name}.pdf')
     plt.show()
 
 
@@ -245,9 +250,9 @@ def evaluate(model):
 
 
 def train_using_buffer():
-    # buffer_name = 'cartpole_buffer_dict'
+    buffer_name = 'cartpole_buffer_dict'
     # buffer_name = 'flappybird_buffer_dict'
-    buffer_name = 'lunarLander_buffer_dict'
+    # buffer_name = 'lunarLander_buffer_dict'
 
     with open('./buffer/' + buffer_name + '.pkl', 'rb') as f:
         buffer_dict = pickle.load(f)
@@ -434,5 +439,5 @@ if __name__ == '__main__':
 
     # train()
     # collect_buffer()
-    train_using_buffer()
-    # plot()
+    # train_using_buffer()
+    plot()
