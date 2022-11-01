@@ -67,11 +67,25 @@ def collect_buffer(n=1000):
     model = PPO(config, state_dim, action_dim).to(config.device)
 
     # for cp
+    # model.load_state_dict(
+    #     torch.load(
+    #         r".\output\CartPole-v1\True\2022-10-20-23-00-29\model\model_4000.pkl"
+    #     ))
+    # buffer_name = 'cartpole_buffer_dict'
+
+    # for fb
+    # model.load_state_dict(
+    #     torch.load(
+    #         r".\output\FlappyBird\False\2022-10-31-19-53-53\model\model_1202.pkl"
+    #     ))
+    # buffer_name = 'flappybird_buffer_dict'
+
+    # for ll
     model.load_state_dict(
         torch.load(
-            r".\output\CartPole-v1\True\2022-10-20-23-00-29\model\model_4000.pkl"
+            r".\output\LunarLander-v2\True\2022-10-31-15-54-19\model\model_14000.pkl"
         ))
-    buffer_name = 'cartpole_buffer_dict'
+    buffer_name = 'lunarLander_buffer_dict'
 
     ep_reward = 0
     s = env.reset()
@@ -115,8 +129,9 @@ def collect_buffer(n=1000):
             s = s_prime
 
             if done:
-                buffer_dict['s'][epi] = s_lst
-                buffer_dict['a'][epi] = a_lst
+                if ep_reward > 200:  #*
+                    buffer_dict['s'][epi] = s_lst
+                    buffer_dict['a'][epi] = a_lst
 
                 print('epi: {} | ep_reward: {}'.format(epi, ep_reward))
                 ep_reward = 0
@@ -230,8 +245,9 @@ def evaluate(model):
 
 
 def train_using_buffer():
-    buffer_name = 'cartpole_buffer_dict'
+    # buffer_name = 'cartpole_buffer_dict'
     # buffer_name = 'flappybird_buffer_dict'
+    buffer_name = 'lunarLander_buffer_dict'
 
     with open('./buffer/' + buffer_name + '.pkl', 'rb') as f:
         buffer_dict = pickle.load(f)
@@ -276,7 +292,7 @@ def train_using_buffer():
         if res > best:
             torch.save(
                 model.state_dict(),
-                os.path.join('./buffer', buffer_name + '_model_best_b64_lrelu_n32.pkl'))
+                os.path.join('./buffer', buffer_name + '_model_best.pkl'))
             best = res
             print('saved')
 
