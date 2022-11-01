@@ -11,6 +11,7 @@ from env_flappybird_kogun import FlappyBirdEnv
 import time
 import wandb
 import pickle
+from controller import Controller
 
 
 # Single CPU
@@ -136,6 +137,8 @@ def train():
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
+    model_teacher = Controller(state_dim, action_dim, config)
+    model_teacher.p_cof = 1
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -146,12 +149,14 @@ def train():
     ep_count = 0
     ep_reward = 0
     last_ep_reward = 0
+    ep_teacher_1 = 200
+    ep_teacher_2 = 100
 
     s = env.reset()
     steps = 0
 
     while True:
-        for _ in range(config.t_horizon ** 10):  # TODO
+        for i in range(config.t_horizon ** 10):
             with torch.no_grad():
                 if config.continuous:
                     mu = model.actor(
@@ -166,9 +171,15 @@ def train():
                     logprob = dist.log_prob(a)
                     a = a.cpu().data.numpy().flatten()
                 else:
-                    prob = model.actor(
-                        torch.as_tensor(s.reshape(1, -1),
-                                        dtype=torch.float).to(config.device))
+                    if i < ep_teacher_1 and ep_count < ep_teacher_2:  #*
+                        prob = model_teacher(
+                            torch.as_tensor(s.reshape(1, -1),
+                                            dtype=torch.float).to(config.device))
+                    else:
+                        prob = model.actor(
+                            torch.as_tensor(s.reshape(1, -1),
+                                            dtype=torch.float).to(config.device))
+                    
                     m = Categorical(prob)
                     a = m.sample().item()
                     logprob = torch.log(torch.squeeze(prob)[a])
