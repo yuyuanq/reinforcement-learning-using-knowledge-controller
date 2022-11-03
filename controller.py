@@ -29,6 +29,8 @@ class Controller(torch.nn.Module):
 
         # for ll
         # self.rule_dict = nn.ModuleDict({
+
+            
         #     '0':
         #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)]),
         #     '1':
@@ -38,7 +40,6 @@ class Controller(torch.nn.Module):
         #     '3':
         #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)])
         # })
-
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):

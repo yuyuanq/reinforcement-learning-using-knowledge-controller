@@ -277,6 +277,8 @@ def train_using_buffer():
     best = -np.inf
 
     for epoch in range(1000):
+        losses = []
+
         for _, data in tqdm(enumerate(train_loader)):
             s, a = data
 
@@ -286,13 +288,15 @@ def train_using_buffer():
             outputs = model.actor(s)
 
             optimizer.zero_grad()
-            loss = criterion(outputs, a.long())
+            loss = criterion(outputs, a.long()).mean()
+            losses.append(loss.item())
+
             loss.backward()
             nn.utils.clip_grad_norm_(model.actor.parameters(), 0.5)
             optimizer.step()
 
         res = evaluate(model)
-        print("epoch: {}, ave score: {:.1f}".format(epoch, res))
+        print("epoch: {}, ave score: {:.1f}, loss: {:.3f}".format(epoch, res, np.mean(losses)))
 
         if res > best:
             torch.save(
