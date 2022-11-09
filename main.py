@@ -12,7 +12,6 @@ import time
 import wandb
 import pickle
 
-
 # Single CPU
 cpu_num = 1
 os.environ['OMP_NUM_THREADS'] = str(cpu_num)
@@ -151,63 +150,67 @@ def train():
     steps = 0
 
     while True:
-        for _ in range(config.t_horizon ** 10):  # TODO
-            with torch.no_grad():
-                if config.continuous:
-                    mu = model.actor(
-                        torch.as_tensor(s.reshape(1, -1),
-                                        dtype=torch.float).to(config.device))
-                    action_var = model.action_var.expand_as(mu)
-                    cov_mat = torch.diag_embed(action_var).to(config.device)
-                    dist = MultivariateNormal(mu, cov_mat)
-                    a = dist.sample()
-                    a = torch.clamp(a, -config.action_scale,
-                                    config.action_scale)
-                    logprob = dist.log_prob(a)
-                    a = a.cpu().data.numpy().flatten()
-                else:
-                    prob = model.actor(
-                        torch.as_tensor(s.reshape(1, -1),
-                                        dtype=torch.float).to(config.device))
-                    m = Categorical(prob)
-                    a = m.sample().item()
-                    logprob = torch.log(torch.squeeze(prob)[a])
+        done = False
 
-            s_prime, r, done, _ = env.step(a)
-            ep_reward += r
+        while not done:
+            for _ in range(config.t_horizon):
+                with torch.no_grad():
+                    if config.continuous:
+                        mu = model.actor(
+                            torch.as_tensor(s.reshape(1, -1),
+                                            dtype=torch.float).to(
+                                                config.device))
+                        action_var = model.action_var.expand_as(mu)
+                        cov_mat = torch.diag_embed(action_var).to(
+                            config.device)
+                        dist = MultivariateNormal(mu, cov_mat)
+                        a = dist.sample()
+                        a = torch.clamp(a, -config.action_scale,
+                                        config.action_scale)
+                        logprob = dist.log_prob(a)
+                        a = a.cpu().data.numpy().flatten()
+                    else:
+                        prob = model.actor(
+                            torch.as_tensor(s.reshape(1, -1),
+                                            dtype=torch.float).to(
+                                                config.device))
+                        m = Categorical(prob)
+                        a = m.sample().item()
+                        logprob = torch.log(torch.squeeze(prob)[a])
 
-            # time.sleep(1 / 2)
-            # print(s, a)
+                s_prime, r, done, _ = env.step(a)
+                ep_reward += r
 
-            # env.render()
+                if render:
+                    env.render()
+                    logger.debug([s_prime, a, r])
+                    time.sleep(1 / 10)
 
-            if render:
-                env.render()
-                logger.debug([s_prime, a, r])
-                time.sleep(1 / 10)
+                model.put_data((s, a, r / config.reward_scale, s_prime,
+                                logprob.item(), done))
+                s = s_prime
 
-            model.put_data(
-                (s, a, r / config.reward_scale, s_prime, logprob.item(), done))
-            s = s_prime
+                steps += 1
+                if steps % config.t_horizon == 0:
+                    update_count_eq += 1
 
-            steps += 1
-            if steps % config.t_horizon == 0:
-                update_count_eq += 1
+                if done:
+                    ep_count += 1
+                    writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
+                    wandb.log({
+                        'ep_reward': ep_reward,
+                        'ep_count': ep_count,
+                        'steps': steps,
+                        'update_count_eq': steps // config.t_horizon
+                    })
+                    last_ep_reward = ep_reward
+                    ep_reward = 0
+                    s = env.reset()
 
+                    break
 
-            if done:
-                ep_count += 1
-                writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
-                wandb.log({'ep_reward': ep_reward, 'ep_count': ep_count, 'steps': steps, 'update_count_eq': steps // config.t_horizon})
-                last_ep_reward = ep_reward
-                ep_reward = 0
-                s = env.reset()
-                done = False
-
-                break
-
-        model.train_net()
-        update_count += 1
+            model.train_net()
+            update_count += 1
 
         if update_count % config.print_interval == 0:
             if config.no_controller:
@@ -223,13 +226,14 @@ def train():
         if update_count_eq % config.save_interval == 0:
             torch.save(
                 model.state_dict(),
-                os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
+                os.path.join(model_dir,
+                             'model_{}.pkl'.format(update_count_eq)))
 
         writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
 
         if update_count_eq >= config.max_update:
             break
-    
+
     torch.save(model.state_dict(),
                os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
     env.close()
@@ -267,7 +271,7 @@ if __name__ == '__main__':
                    help='The ratio of reward reduction')
     p.add_argument('--max_update',
                    type=int,
-                   default=4000,
+                   default=5000,
                    help='Max update count for training')
     p.add_argument('--save_interval',
                    type=int,
@@ -347,9 +351,7 @@ if __name__ == '__main__':
                    type=int,
                    default=30,
                    help='The number of minibatch')
-    p.add_argument('--info',
-                   type=str,
-                   default='')
+    p.add_argument('--info', type=str, default='')
 
     config = p.parse_args()
 
