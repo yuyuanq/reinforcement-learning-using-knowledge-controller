@@ -27,8 +27,8 @@ class SADataset(Dataset):
 
         keys = list(buffer_dict['s'].keys())
 
-        # if len(keys) > 100:
-        #     keys = keys[:100]
+        if len(keys) > 200:
+            keys = keys[:200]
         
         for i in keys:
             for j in range(len(buffer_dict['s'][i])):
@@ -250,6 +250,13 @@ def evaluate(model):
 
 
 def train_using_buffer():
+    wandb.init(
+        project='knowledge-rl',
+        name=f'seed_{config.seed}',
+        group=f'{config.env}_{config.no_controller}_{config.info}',
+        dir='./output',
+    )
+
     buffer_name = 'cartpole_buffer_dict'
     # buffer_name = 'flappybird_buffer_dict'
     # buffer_name = 'lunarLander_buffer_dict'
@@ -297,6 +304,7 @@ def train_using_buffer():
 
         res = evaluate(model)
         print("epoch: {}, ave score: {:.1f}, loss: {:.3f}".format(epoch, res, np.mean(losses)))
+        wandb.log({'reward': res})
 
         if res > best:
             torch.save(
@@ -304,6 +312,125 @@ def train_using_buffer():
                 os.path.join('./buffer', buffer_name + '_model_best.pkl'))
             best = res
             print('saved')
+
+
+def train():
+    wandb.init(
+        project='knowledge-rl',
+        name=f'seed_{config.seed}',
+        group=f'{config.env}_{config.no_controller}_{config.info}',
+        dir='./output',
+    )
+
+    render = False
+    writer = SummaryWriter(log_dir=log_dir)
+
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed,
+                             delay_step=config.delay_step)
+    state_dim, action_dim = env.get_space_dim()
+
+    model = PPO(config, state_dim, action_dim).to(config.device)
+
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            logger.debug('%s: %s' % (name, param.size()))
+
+    update_count = 0
+    update_count_eq = 0
+    ep_count = 0
+    ep_reward = 0
+    last_ep_reward = 0
+
+    s = env.reset()
+    steps = 0
+
+    while True:
+        done = False
+
+        while not done:
+            for _ in range(config.t_horizon):
+                with torch.no_grad():
+                    if config.continuous:
+                        mu = model.actor(
+                            torch.as_tensor(s.reshape(1, -1),
+                                            dtype=torch.float).to(
+                                                config.device))
+                        action_var = model.action_var.expand_as(mu)
+                        cov_mat = torch.diag_embed(action_var).to(
+                            config.device)
+                        dist = MultivariateNormal(mu, cov_mat)
+                        a = dist.sample()
+                        a = torch.clamp(a, -config.action_scale,
+                                        config.action_scale)
+                        logprob = dist.log_prob(a)
+                        a = a.cpu().data.numpy().flatten()
+                    else:
+                        prob = model.actor(
+                            torch.as_tensor(s.reshape(1, -1),
+                                            dtype=torch.float).to(
+                                                config.device))
+                        m = Categorical(prob)
+                        a = m.sample().item()
+                        logprob = torch.log(torch.squeeze(prob)[a])
+
+                s_prime, r, done, _ = env.step(a)
+                ep_reward += r
+
+                if render:
+                    env.render()
+                    logger.debug([s_prime, a, r])
+                    time.sleep(1 / 10)
+
+                model.put_data((s, a, r / config.reward_scale, s_prime,
+                                logprob.item(), done))
+                s = s_prime
+
+                steps += 1
+                if steps % config.t_horizon == 0:
+                    update_count_eq += 1
+
+                if done:
+                    ep_count += 1
+                    writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
+                    wandb.log({
+                        'ep_reward': ep_reward,
+                        'ep_count': ep_count,
+                        'steps': steps,
+                        'update_count_eq': steps // config.t_horizon
+                    })
+                    last_ep_reward = ep_reward
+                    ep_reward = 0
+                    s = env.reset()
+
+                    break
+
+            model.train_net()
+            update_count += 1
+
+        if update_count % config.print_interval == 0:
+            logger.info(
+                "episode: {}, update count: {}, reward: {:.1f}, steps:{}"
+                .format(ep_count, update_count, last_ep_reward, steps))
+
+        if update_count_eq % config.save_interval == 0:
+            torch.save(
+                model.state_dict(),
+                os.path.join(model_dir,
+                             'model_{}.pkl'.format(update_count_eq)))
+
+        writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
+
+        if update_count_eq >= config.max_update:
+            break
+
+    torch.save(model.state_dict(),
+               os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
+    env.close()
 
 
 if __name__ == '__main__':
@@ -441,7 +568,7 @@ if __name__ == '__main__':
 
     apply_seed(config.seed)
 
-    # train()
+    train()
     # collect_buffer()
     # train_using_buffer()
-    plot()
+    # plot()

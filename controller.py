@@ -53,8 +53,8 @@ class Controller(torch.nn.Module):
             rule_list_for_action = [
                 rule(s).reshape(-1, 1) for rule in self.rule_dict[str(i)]
             ]
-            strength_all[:, i] = torch.max(torch.cat(rule_list_for_action, 1),
-                                           1)[0]  # max
+            strength_all[:, i] = torch.max(
+                torch.cat(rule_list_for_action, 1), 1)[0]  # max
         return F.softmax(strength_all * 10, dim=1)
 
 
@@ -72,6 +72,8 @@ class MembershipNetwork(torch.nn.Module):
 
         return x
 
+
+SMALL_NUM = 1e-3
 
 class Rule(torch.nn.Module):
 
@@ -94,16 +96,21 @@ class Rule(torch.nn.Module):
                 mf(s[:, self.state_id[i]].reshape(-1, 1)))
 
         # Method 1: use soft min
-        weight = torch.zeros_like(membership_all)
-        for i in range(weight.shape[1]):
-            weight[:, i] = 1 / membership_all[:, i]
-        
+        membership_all = torch.where(
+            membership_all < SMALL_NUM, torch.as_tensor(SMALL_NUM), membership_all)
+        soft_weight = torch.zeros_like(membership_all)
+        for i in range(soft_weight.shape[1]):
+            soft_weight[:, i] = 1 / membership_all[:, i]
+
+        soft_weight = torch.softmax(soft_weight / 10, 1)
+        if soft_weight.shape[0] > 1:
+            pass
+
         min_strength = torch.zeros((s.shape[0], 1))
         for i in range(membership_all.shape[1]):
-            min_strength += torch.unsqueeze(membership_all[:, i] * weight[:, i], 1)
-        
-        min_strength /= torch.sum(weight, dim=1, keepdim=True)
-        min_strength[torch.isnan(min_strength)] = 1e-20
+            min_strength += torch.unsqueeze(
+                membership_all[:, i] * soft_weight[:, i], 1)
+        # min_strength[torch.isnan(min_strength)] = SMALL_NUM
 
         # Method 2: use min
         # min_strength = torch.min(membership_all, dim=1, keepdim=True)[0]
