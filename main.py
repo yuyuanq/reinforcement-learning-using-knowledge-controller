@@ -19,6 +19,7 @@ from torch import optim, nn
 from torch.autograd import Variable
 from tqdm import tqdm
 
+
 class SADataset(Dataset):
 
     def __init__(self, buffer_dict):
@@ -29,7 +30,7 @@ class SADataset(Dataset):
 
         if len(keys) > 200:
             keys = keys[:200]
-        
+
         for i in keys:
             for j in range(len(buffer_dict['s'][i])):
 
@@ -162,7 +163,7 @@ def plot():
 
     model = PPO(config, state_dim, action_dim).to(config.device)
 
-    model.load_state_dict(torch.load('./buffer/' + buffer_name + '_model_best.pkl'))
+    model.load_state_dict(torch.load('tmp\model\model_10000.pkl'))
 
     if config.env == 'FlappyBird':
         ob_high = [300, 15, 300, 40, 60]
@@ -209,7 +210,7 @@ def plot():
                 if mfID == 0:
                     plt.ylabel('Membership', fontsize=12)
 
-    plt.savefig(f'./buffer/auto_{buffer_name}.pdf')
+    plt.savefig(f'./tmp/auto_{buffer_name}.pdf')
     plt.show()
 
 
@@ -251,7 +252,7 @@ def evaluate(model):
 
 def train_using_buffer():
     wandb.init(
-        project='knowledge-rl',
+        project='knowledge-transfer',
         name=f'seed_{config.seed}',
         group=f'{config.env}_{config.no_controller}_{config.info}',
         dir='./output',
@@ -303,7 +304,8 @@ def train_using_buffer():
             optimizer.step()
 
         res = evaluate(model)
-        print("epoch: {}, ave score: {:.1f}, loss: {:.3f}".format(epoch, res, np.mean(losses)))
+        print("epoch: {}, ave score: {:.1f}, loss: {:.3f}".format(
+            epoch, res, np.mean(losses)))
         wandb.log({'reward': res})
 
         if res > best:
@@ -316,7 +318,7 @@ def train_using_buffer():
 
 def train():
     wandb.init(
-        project='knowledge-rl',
+        project='knowledge-transfer',
         name=f'seed_{config.seed}',
         group=f'{config.env}_{config.no_controller}_{config.info}',
         dir='./output',
@@ -335,6 +337,7 @@ def train():
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
+    # print(model)
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -416,6 +419,9 @@ def train():
             logger.info(
                 "episode: {}, update count: {}, reward: {:.1f}, steps:{}"
                 .format(ep_count, update_count, last_ep_reward, steps))
+            
+            print(model.actor.rule_dict['0'][0].p_select)
+            print(model.actor.rule_dict['1'][0].p_select)
 
         if update_count_eq % config.save_interval == 0:
             torch.save(
@@ -431,6 +437,22 @@ def train():
     torch.save(model.state_dict(),
                os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
     env.close()
+
+
+# def transfer():
+#     if config.env == 'FlappyBird':
+#         env = FlappyBirdEnv(seed=config.seed)
+#         env.step(0)
+#     else:
+#         env = GymEnvironment(env_name=config.env,
+#                              seed=config.seed,
+#                              delay_step=config.delay_step)
+#     state_dim, action_dim = env.get_space_dim()
+
+#     model = PPO(config, state_dim, action_dim).to(config.device)
+
+#     model.load_state_dict(
+#         r'output\CartPole-v1\Auto\2022-10-29-14-36-02\model\model_11000.pkl')
 
 
 if __name__ == '__main__':
@@ -550,10 +572,8 @@ if __name__ == '__main__':
     config = p.parse_args()
 
     time_stamp = time.strftime("%F-%H-%M-%S")
-    log_dir = os.path.join(config.output_dir, config.env, 'Auto', time_stamp,
-                           'log')
-    model_dir = os.path.join(config.output_dir, config.env, 'Auto', time_stamp,
-                             'model')
+    log_dir = os.path.join(config.output_dir, config.env, 'Auto', time_stamp, 'log')
+    model_dir = os.path.join(config.output_dir, config.env, 'Auto', time_stamp, 'model')
 
     os.makedirs(config.output_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
@@ -572,3 +592,4 @@ if __name__ == '__main__':
     # collect_buffer()
     # train_using_buffer()
     # plot()
+    # transfer()

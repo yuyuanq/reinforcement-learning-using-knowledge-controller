@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
+
+
+SMALL_NUM = 0.015
 
 
 class Controller(torch.nn.Module):
@@ -30,7 +34,6 @@ class Controller(torch.nn.Module):
         # for ll
         # self.rule_dict = nn.ModuleDict({
 
-            
         #     '0':
         #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)]),
         #     '1':
@@ -73,7 +76,64 @@ class MembershipNetwork(torch.nn.Module):
         return x
 
 
-SMALL_NUM = 1e-3
+def onehot_from_logits(logits, eps=0.0):
+    """
+    Given batch of logits, return one-hot sample using epsilon greedy strategy
+    (based on given epsilon)
+    """
+    # get best (according to current policy) actions in one-hot form
+    argmax_acs = (logits == logits.max(1, keepdim=True)[0]).float()
+    # print(logits[0],"a")
+    # print(len(argmax_acs),argmax_acs[0])
+    if eps == 0.0:
+        return argmax_acs
+
+# modified for PyTorch from https://github.com/ericjang/gumbel-softmax/blob/master/Categorical%20VAE.ipynb
+
+
+def sample_gumbel(shape, eps=1e-20, tens_type=torch.FloatTensor):
+    """Sample from Gumbel(0, 1)"""
+    U = Variable(tens_type(*shape).uniform_(), requires_grad=False)
+    return -torch.log(-torch.log(U + eps) + eps)
+
+# modified for PyTorch from https://github.com/ericjang/gumbel-softmax/blob/master/Categorical%20VAE.ipynb
+
+
+def gumbel_softmax_sample(logits, temperature):
+    """ Draw a sample from the Gumbel-Softmax distribution"""
+    y = logits + sample_gumbel(logits.shape, tens_type=type(logits.data))
+    return F.softmax(y / temperature, dim=1)
+
+# modified for PyTorch from https://github.com/ericjang/gumbel-softmax/blob/master/Categorical%20VAE.ipynb
+
+
+def gumbel_softmax(logits, temperature=1, hard=False):
+    """Sample from the Gumbel-Softmax distribution and optionally discretize.
+    Args:
+      logits: [batch_size, n_class] unnormalized log-probs
+      temperature: non-negative scalar
+      hard: if True, take argmax, but differentiate w.r.t. soft sample y
+    Returns:
+      [batch_size, n_class] sample from the Gumbel-Softmax distribution.
+      If hard=True, then the returned sample will be one-hot, otherwise it will
+      be a probabilitiy distribution that sums to 1 across classes
+    """
+    y = gumbel_softmax_sample(logits, temperature)
+    if hard:
+        y_hard = onehot_from_logits(y)
+        #print(y_hard[0], "random")
+        y = (y_hard - y).detach() + y
+    return y
+
+
+def softmax(X, gumbel_select):
+    X_exp = X.exp()
+    if sum(gumbel_select[:, 1]) > SMALL_NUM:
+        X_exp = X_exp * gumbel_select[:, 1]
+
+    partition = X_exp.sum(dim=1, keepdim=True)
+    return X_exp / partition
+
 
 class Rule(torch.nn.Module):
 
@@ -85,6 +145,12 @@ class Rule(torch.nn.Module):
         self.membership_network_list = nn.ModuleList()
         for _ in range(len(state_id_list)):
             self.membership_network_list.append(MembershipNetwork())
+
+        p_select_tensor = torch.ones((len(state_id_list), 2)) * 10  # TODO: adjust
+        p_select_tensor[:, 0] = 0
+
+        self.p_select = nn.Parameter(p_select_tensor)
+        self.debug_count_1 = 0
 
     def forward(self, s):
         membership_all = torch.zeros(
@@ -99,18 +165,26 @@ class Rule(torch.nn.Module):
         membership_all = torch.where(
             membership_all < SMALL_NUM, torch.as_tensor(SMALL_NUM), membership_all)
         soft_weight = torch.zeros_like(membership_all)
-        for i in range(soft_weight.shape[1]):
-            soft_weight[:, i] = 1 / membership_all[:, i]
+        gumbel_select = gumbel_softmax(self.p_select, hard=True)
 
-        soft_weight = torch.softmax(soft_weight / 10, 1)
-        if soft_weight.shape[0] > 1:
-            pass
+        for i in range(soft_weight.shape[1]):
+            # soft_weight[:, i] = -(gumbel_select[i, 1] * membership_all[:, i])  # TODO: adjust
+            soft_weight[:, i] = gumbel_select[i, 1] / membership_all[:, i]
+
+        soft_weight = softmax(soft_weight * 0.1, gumbel_select)  # TODO: adjust
+        # soft_weight = torch.softmax(soft_weight, 1)
 
         min_strength = torch.zeros((s.shape[0], 1))
         for i in range(membership_all.shape[1]):
             min_strength += torch.unsqueeze(
-                membership_all[:, i] * soft_weight[:, i], 1)
-        # min_strength[torch.isnan(min_strength)] = SMALL_NUM
+                membership_all[:, i] * soft_weight[:, i] * gumbel_select[i, 1], 1)
+        # print(self.p_select, gumbel_select, soft_weight, membership_all, min_strength)
+
+        if torch.any(torch.isnan(min_strength)):
+            self.debug_count_1 += 1
+            print('*'*30 + 'Warning: NaN is not a valid, count_1: {}'.format(self.debug_count_1))
+            print(self.p_select, gumbel_select, soft_weight, membership_all, min_strength)
+            min_strength = torch.where(torch.isnan(min_strength), torch.full_like(min_strength, 0), min_strength)
 
         # Method 2: use min
         # min_strength = torch.min(membership_all, dim=1, keepdim=True)[0]
