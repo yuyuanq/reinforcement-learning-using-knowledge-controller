@@ -33,7 +33,6 @@ class Controller(torch.nn.Module):
 
         # for ll
         # self.rule_dict = nn.ModuleDict({
-
         #     '0':
         #     nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.config.device)]),
         #     '1':
@@ -53,20 +52,59 @@ class Controller(torch.nn.Module):
             (s.shape[0], self.action_dim)).to(self.config.device)
 
         for i in range(self.action_dim):
-            rule_list_for_action = [
-                rule(s).reshape(-1, 1) for rule in self.rule_dict[str(i)]
-            ]
-            strength_all[:, i] = torch.max(
-                torch.cat(rule_list_for_action, 1), 1)[0]  # max
+            rule_list_for_action = [rule(s).reshape(-1, 1) for rule in self.rule_dict[str(i)]]
+            strength_all[:, i] = torch.max(torch.cat(rule_list_for_action, 1), 1)[0]
+
         return F.softmax(strength_all * 10, dim=1)
+
+
+class FuzzyTreeController(torch.nn.Module):
+    def __init__(self, state_dim, action_dim, config):
+        super().__init__()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.config = config
+
+        # For cp
+        tree_height = 2
+        leaves_num = 2 ** tree_height
+
+        self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3], self.config.device) for _ in range(int(2 ** tree_height - 1))])
+        self.leaves_params = nn.Parameter(
+            torch.randn((leaves_num, action_dim)))
+
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                nn.init.xavier_uniform_(m.weight)
+
+    def forward(self, s):
+        rule_tree_strength = [self.rule_tree[i](s) for i in range(len(self.rule_tree))]
+        leaves_distribution = torch.softmax(self.leaves_params, 1)
+
+        # output = 0
+        # output += torch.mm(rule_tree_strength[0] * rule_tree_strength[1], torch.unsqueeze(leaves_distribution[0, :], 0))
+        # output += torch.mm(rule_tree_strength[0] * (1-rule_tree_strength[1]), torch.unsqueeze(leaves_distribution[1, :], 0))
+        # output += torch.mm((1-rule_tree_strength[0]) * rule_tree_strength[2], torch.unsqueeze(leaves_distribution[2, :], 0))
+        # output += torch.mm((1-rule_tree_strength[0]) * (1-rule_tree_strength[2]), torch.unsqueeze(leaves_distribution[3, :], 0))
+
+        path_p = torch.cat([rule_tree_strength[0] * rule_tree_strength[1],
+                  rule_tree_strength[0] * (1-rule_tree_strength[1]),
+                  (1-rule_tree_strength[0]) * rule_tree_strength[2],
+                  (1-rule_tree_strength[0]) * (1-rule_tree_strength[2])], axis=1)
+        idx = torch.argmax(path_p, axis=1)
+
+        output = leaves_distribution[idx, :]
+        return output
 
 
 class MembershipNetwork(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = torch.nn.Linear(1, 16)
-        self.fc2 = torch.nn.Linear(16, 16)
-        self.fc3 = torch.nn.Linear(16, 1)
+        hidden_size = 4
+
+        self.fc1 = torch.nn.Linear(1, hidden_size)
+        self.fc2 = torch.nn.Linear(hidden_size, hidden_size)
+        self.fc3 = torch.nn.Linear(hidden_size, 1)
 
     def forward(self, s):
         x = F.leaky_relu(self.fc1(s))
@@ -74,6 +112,66 @@ class MembershipNetwork(torch.nn.Module):
         x = torch.sigmoid(self.fc3(x))
 
         return x
+
+
+class Rule(torch.nn.Module):
+
+    def __init__(self, state_id_list, device):
+        super().__init__()
+        self.state_id = state_id_list
+        self.device = device
+
+        self.membership_network_list = nn.ModuleList()
+        for _ in range(len(state_id_list)):
+            self.membership_network_list.append(MembershipNetwork())
+
+        p_select_tensor = torch.ones((len(state_id_list), 2)) * 10  # * adjust
+        p_select_tensor[:, 0] = 0
+
+        self.p_select = nn.Parameter(p_select_tensor)
+        self.debug_count_1 = 0
+
+    def forward(self, s):
+        membership_all = torch.zeros(
+            (s.shape[0], len(self.state_id))).to(self.device)
+
+        for i in range(len(self.state_id)):
+            mf = self.membership_network_list[i]
+            membership_all[:, i] = torch.squeeze(
+                mf(s[:, self.state_id[i]].reshape(-1, 1)))
+
+        # Method 1: use soft min
+        membership_all = torch.where(
+            membership_all < SMALL_NUM, torch.as_tensor(SMALL_NUM), membership_all)
+        soft_weight = torch.zeros_like(membership_all)
+        gumbel_select = gumbel_softmax(self.p_select, hard=True)
+
+        for i in range(soft_weight.shape[1]):
+            # soft_weight[:, i] = -(gumbel_select[i, 1] * membership_all[:, i])  #* adjust
+            soft_weight[:, i] = gumbel_select[i, 1] / membership_all[:, i]
+
+        soft_weight = softmax(soft_weight * 0.1, gumbel_select)  # * adjust
+        # soft_weight = torch.softmax(soft_weight, 1)
+
+        strength = torch.zeros((s.shape[0], 1))
+        for i in range(membership_all.shape[1]):
+            strength += torch.unsqueeze(
+                membership_all[:, i] * soft_weight[:, i] * gumbel_select[i, 1], 1)
+        # print(self.p_select, gumbel_select, soft_weight, membership_all, min_strength)
+
+        if torch.any(torch.isnan(strength)):
+            self.debug_count_1 += 1
+            print(
+                '*'*30 + 'Warning: NaN is not a valid, count_1: {}'.format(self.debug_count_1))
+            print(self.p_select, gumbel_select,
+                  soft_weight, membership_all, strength)
+            strength = torch.where(torch.isnan(
+                strength), torch.full_like(strength, 0), strength)
+
+        # Method 2: use min
+        # min_strength = torch.min(membership_all, dim=1, keepdim=True)[0]
+
+        return strength
 
 
 def onehot_from_logits(logits, eps=0.0):
@@ -133,60 +231,3 @@ def softmax(X, gumbel_select):
 
     partition = X_exp.sum(dim=1, keepdim=True)
     return X_exp / partition
-
-
-class Rule(torch.nn.Module):
-
-    def __init__(self, state_id_list, device):
-        super().__init__()
-        self.state_id = state_id_list
-        self.device = device
-
-        self.membership_network_list = nn.ModuleList()
-        for _ in range(len(state_id_list)):
-            self.membership_network_list.append(MembershipNetwork())
-
-        p_select_tensor = torch.ones((len(state_id_list), 2)) * 10  # TODO: adjust
-        p_select_tensor[:, 0] = 0
-
-        self.p_select = nn.Parameter(p_select_tensor)
-        self.debug_count_1 = 0
-
-    def forward(self, s):
-        membership_all = torch.zeros(
-            (s.shape[0], len(self.state_id))).to(self.device)
-
-        for i in range(len(self.state_id)):
-            mf = self.membership_network_list[i]
-            membership_all[:, i] = torch.squeeze(
-                mf(s[:, self.state_id[i]].reshape(-1, 1)))
-
-        # Method 1: use soft min
-        membership_all = torch.where(
-            membership_all < SMALL_NUM, torch.as_tensor(SMALL_NUM), membership_all)
-        soft_weight = torch.zeros_like(membership_all)
-        gumbel_select = gumbel_softmax(self.p_select, hard=True)
-
-        for i in range(soft_weight.shape[1]):
-            # soft_weight[:, i] = -(gumbel_select[i, 1] * membership_all[:, i])  # TODO: adjust
-            soft_weight[:, i] = gumbel_select[i, 1] / membership_all[:, i]
-
-        soft_weight = softmax(soft_weight * 0.1, gumbel_select)  # TODO: adjust
-        # soft_weight = torch.softmax(soft_weight, 1)
-
-        min_strength = torch.zeros((s.shape[0], 1))
-        for i in range(membership_all.shape[1]):
-            min_strength += torch.unsqueeze(
-                membership_all[:, i] * soft_weight[:, i] * gumbel_select[i, 1], 1)
-        # print(self.p_select, gumbel_select, soft_weight, membership_all, min_strength)
-
-        if torch.any(torch.isnan(min_strength)):
-            self.debug_count_1 += 1
-            print('*'*30 + 'Warning: NaN is not a valid, count_1: {}'.format(self.debug_count_1))
-            print(self.p_select, gumbel_select, soft_weight, membership_all, min_strength)
-            min_strength = torch.where(torch.isnan(min_strength), torch.full_like(min_strength, 0), min_strength)
-
-        # Method 2: use min
-        # min_strength = torch.min(membership_all, dim=1, keepdim=True)[0]
-
-        return min_strength

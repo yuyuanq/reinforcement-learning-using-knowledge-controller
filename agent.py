@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from controller import Controller
+from controller import Controller, FuzzyTreeController
 from torch.distributions import Categorical, MultivariateNormal, Normal
+import SDT
 
-HIDDEN_SIZE = 32  #*
+
+HIDDEN_SIZE = 128  #*
 
 class Actor(torch.nn.Module):
 
@@ -51,7 +53,7 @@ class Critic(torch.nn.Module):
     def __init__(self, state_dim):
         super().__init__()
         self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
-        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        # self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.fc_v = torch.nn.Linear(HIDDEN_SIZE, 1)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
@@ -60,7 +62,7 @@ class Critic(torch.nn.Module):
 
     def forward(self, s):
         x = F.relu(self.fc1(s))
-        x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc2(x))
         return self.fc_v(x)
 
 
@@ -86,12 +88,15 @@ class PPO(nn.Module):
         else:
             if config.no_controller:
                 self.actor = Actor(state_dim, action_dim)
-            else:
-                self.actor = Controller(state_dim, action_dim, config)
+            else: #*
+                # self.actor = FuzzyTreeController(state_dim, action_dim, config)
+                self.policy = SDT.SDT()
+                self.actor = lambda x: self.policy.forward(x, LogProb=False)[1]
+
 
         self.critic = Critic(state_dim)
 
-        self.optimizer = optim.Adam(self.parameters(),
+        self.optimizer = optim.Adam(list(self.parameters())+list(self.policy.parameters()),
                                     lr=self.config.learning_rate)
         self.MseLoss = nn.SmoothL1Loss()
 
@@ -128,8 +133,8 @@ class PPO(nn.Module):
         s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [
             x.to(self.config.device) for x in self.make_batch()
         ]
-        mini_batch = s_.shape[0] // (1 if not self.config.use_minibatch else
-                                     self.config.minibatch)
+        # print(s_.shape)
+        mini_batch = s_.shape[0] // (1 if not self.config.use_minibatch else self.config.minibatch)
 
         for i in range(self.config.k_epoch):
             with torch.no_grad():
@@ -163,9 +168,7 @@ class PPO(nn.Module):
                             0]
                         advantage_lst.append([advantage])
                     advantage_lst.reverse()
-                    advantage_ = torch.tensor(advantage_lst,
-                                              dtype=torch.float).to(
-                                                  self.config.device)
+                    advantage_ = torch.tensor(advantage_lst, dtype=torch.float).to(self.config.device)
 
             # In most cases, do not use mini batch
             for k in range(s_.shape[0] // mini_batch):
@@ -196,10 +199,10 @@ class PPO(nn.Module):
                                     1 + self.config.eps_clip) * advantage
 
                 loss = -torch.min(surr1, surr2) + \
-                       self.config.mse_cof * self.MseLoss(td_target, self.critic(s)) - \
+                       self.config.mse_cof * self.MseLoss(td_target.detach(), self.critic(s)) - \
                        self.config.entropy_cof * entropy
 
                 self.optimizer.zero_grad()
                 loss.mean().backward()
-                nn.utils.clip_grad_norm_(self.parameters(), 0.5)
+                # nn.utils.clip_grad_norm_(self.parameters(), 0.5)
                 self.optimizer.step()

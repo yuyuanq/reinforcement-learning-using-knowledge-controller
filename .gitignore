@@ -1,5 +1,5 @@
-/runs/**
-/tmp/**
+runs/**
+tmp/**
 *.pdf
 .idea
 __pycache__

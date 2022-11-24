@@ -20,6 +20,12 @@ from torch.autograd import Variable
 from tqdm import tqdm
 
 
+# Global plot settings
+sns.set_style("dark")
+sns.despine(left=True)
+plt.rcParams["font.family"] = "Times New Roman"
+
+
 class SADataset(Dataset):
 
     def __init__(self, buffer_dict):
@@ -147,7 +153,7 @@ def collect_buffer(n=1000):
     env.close()
 
 
-def plot():
+def plot_controller(filepath):
     buffer_name = 'cartpole_buffer_dict'
     # buffer_name = 'flappybird_buffer_dict'
     # buffer_name = 'lunarLander_buffer_dict'
@@ -163,7 +169,7 @@ def plot():
 
     model = PPO(config, state_dim, action_dim).to(config.device)
 
-    model.load_state_dict(torch.load('tmp\model\model_10000.pkl'))
+    model.load_state_dict(torch.load(filepath))
 
     if config.env == 'FlappyBird':
         ob_high = [300, 15, 300, 40, 60]
@@ -214,6 +220,66 @@ def plot():
     plt.show()
 
 
+def plot_rule(filepath, rule_id=0):
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed,
+                             delay_step=config.delay_step)
+    state_dim, action_dim = env.get_space_dim()
+
+    model = PPO(config, state_dim, action_dim).to(config.device)
+
+    model.load_state_dict(torch.load(filepath))
+
+    leaves_distribution = torch.softmax(model.policy.param, 1)
+    print('leaves_distribution: {}'.format(leaves_distribution))
+
+    if config.env == 'FlappyBird':
+        ob_high = [300, 15, 300, 40, 60]
+        ob_low = [100, -15, 10, -60, -40]
+    elif config.env == 'CartPole-v1':
+        ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
+        ob_high[1], ob_low[1] = 10, -10
+        ob_high[3], ob_low[3] = 10, -10
+    elif config.env == 'LunarLander-v2':
+        ob_high = [1, 1.5, 1, 1, 1, 1, 1, 1]
+        ob_low = [-1, 0, -1, -1, -1, -1, 0, 0]
+
+    plt.figure(figsize=(8, 2), tight_layout=True)
+    count = 1
+    # x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
+    # x_labels = ['Position', 'Velocity', 'DistenceToNext', 'PositionT', 'PositionB']
+
+    _rule = model.policy.rule_tree[rule_id]
+
+    for mfID, _membership_network in enumerate(_rule.membership_network_list):
+        # fig.add_subplot(1, len(_rule.membership_network_list), count)
+        plt.subplot(1, len(_rule.membership_network_list), count)
+        count += 1
+
+        state_id = _rule.state_id[mfID]
+        x = torch.linspace(ob_low[state_id], ob_high[state_id], 100)
+        y = torch.zeros_like(x)
+
+        for i, _ in enumerate(x):
+            y[i] = _membership_network(
+                _.reshape(-1, 1).to(config.device)).item()
+
+        plt.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
+        plt.box(True)
+        plt.grid(axis='y')
+        plt.ylim([-0.05, 1.05])
+        # plt.xlabel(x_labels[mfID], fontsize=12)
+
+        if mfID == 0:
+            plt.ylabel('Membership', fontsize=12)
+
+    plt.show()
+
+
 def evaluate(model):
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed)
@@ -226,7 +292,7 @@ def evaluate(model):
     score = 0.0
     n = 10
 
-    for epi in range(n):
+    for i in range(n):
         s = env.reset()
         done = False
         epi_reward = 0
@@ -247,6 +313,7 @@ def evaluate(model):
             score += r
             s = s_prime
 
+        print('epi_reward {}: {}'.format(i, epi_reward))
     return score / n
 
 
@@ -348,9 +415,11 @@ def train():
     ep_count = 0
     ep_reward = 0
     last_ep_reward = 0
+    best = -np.inf
 
     s = env.reset()
     steps = 0
+    running_reward_list = []
 
     while True:
         done = False
@@ -394,19 +463,20 @@ def train():
                 s = s_prime
 
                 steps += 1
-                if steps % config.t_horizon == 0:
-                    update_count_eq += 1
+                update_count_eq = steps // config.t_horizon
 
                 if done:
                     ep_count += 1
+
                     writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
                     wandb.log({
                         'ep_reward': ep_reward,
                         'ep_count': ep_count,
                         'steps': steps,
-                        'update_count_eq': steps // config.t_horizon
+                        'update_count_eq': update_count_eq
                     })
                     last_ep_reward = ep_reward
+                    running_reward_list.append(ep_reward)
                     ep_reward = 0
                     s = env.reset()
 
@@ -415,44 +485,47 @@ def train():
             model.train_net()
             update_count += 1
 
-        if update_count % config.print_interval == 0:
-            logger.info(
-                "episode: {}, update count: {}, reward: {:.1f}, steps:{}"
-                .format(ep_count, update_count, last_ep_reward, steps))
-            
-            print(model.actor.rule_dict['0'][0].p_select)
-            print(model.actor.rule_dict['1'][0].p_select)
+        if ep_count % config.print_interval == 0:
+            running_reward = np.mean(np.array(running_reward_list)[-10:])
 
-        if update_count_eq % config.save_interval == 0:
-            torch.save(
-                model.state_dict(),
-                os.path.join(model_dir,
-                             'model_{}.pkl'.format(update_count_eq)))
+            logger.info(
+                "episode: {}, update count: {}, running reward: {:.1f}, steps:{}"
+                .format(ep_count, update_count_eq, running_reward, steps))
+
+            if running_reward > best:
+                best = running_reward
+                torch.save(model.state_dict(), os.path.join(
+                    model_dir, 'model_best.pkl'))
+                logger.info('Saved')
+
+        if ep_count % config.save_interval == 0:
+            torch.save(model.state_dict(), os.path.join(
+                model_dir, 'model_{}.pkl'.format(ep_count)))
 
         writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
 
         if update_count_eq >= config.max_update:
             break
 
-    torch.save(model.state_dict(),
-               os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
+    torch.save(model.state_dict(), os.path.join(
+        model_dir, 'model_{}.pkl'.format(ep_count)))
     env.close()
 
 
-# def transfer():
-#     if config.env == 'FlappyBird':
-#         env = FlappyBirdEnv(seed=config.seed)
-#         env.step(0)
-#     else:
-#         env = GymEnvironment(env_name=config.env,
-#                              seed=config.seed,
-#                              delay_step=config.delay_step)
-#     state_dim, action_dim = env.get_space_dim()
+def dynamic_demo(filepath):
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed,
+                             delay_step=config.delay_step)
+    state_dim, action_dim = env.get_space_dim()
 
-#     model = PPO(config, state_dim, action_dim).to(config.device)
+    model = PPO(config, state_dim, action_dim).to(config.device)
+    model.load_state_dict(torch.load(filepath))
 
-#     model.load_state_dict(
-#         r'output\CartPole-v1\Auto\2022-10-29-14-36-02\model\model_11000.pkl')
+    print(evaluate(model))
 
 
 if __name__ == '__main__':
@@ -591,5 +664,5 @@ if __name__ == '__main__':
     train()
     # collect_buffer()
     # train_using_buffer()
-    # plot()
-    # transfer()
+    # plot_rule(r'tmp\model\model_best.pkl')
+    # dynamic_demo(r'tmp\model\cart-d2-model_best.pkl')
