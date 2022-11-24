@@ -100,7 +100,7 @@ class FuzzyTreeController(torch.nn.Module):
 class MembershipNetwork(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        hidden_size = 4
+        hidden_size = 4  #*
 
         self.fc1 = torch.nn.Linear(1, hidden_size)
         self.fc2 = torch.nn.Linear(hidden_size, hidden_size)

@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 # Global plot settings
 sns.set_style("dark")
-sns.despine(left=True)
+# sns.despine(left=True)
 plt.rcParams["font.family"] = "Times New Roman"
 
 
@@ -220,6 +220,21 @@ def plot_controller(filepath):
     plt.show()
 
 
+def get_ob_high_low(env_name, env):
+    if env_name == 'FlappyBird':
+        ob_high = [300, 15, 300, 40, 60]
+        ob_low = [100, -15, 10, -60, -40]
+    elif env_name == 'CartPole-v1':
+        ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
+        ob_high[1], ob_low[1] = 10, -10
+        ob_high[3], ob_low[3] = 10, -10
+    elif env_name == 'LunarLander-v2':
+        ob_high = [1, 1.5, 1, 1, 1, 1, 1, 1]
+        ob_low = [-1, 0, -1, -1, -1, -1, 0, 0]
+    
+    return ob_high, ob_low
+
+
 def plot_rule(filepath, rule_id=0):
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed)
@@ -231,22 +246,12 @@ def plot_rule(filepath, rule_id=0):
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
-
     model.load_state_dict(torch.load(filepath))
 
     leaves_distribution = torch.softmax(model.policy.param, 1)
     print('leaves_distribution: {}'.format(leaves_distribution))
 
-    if config.env == 'FlappyBird':
-        ob_high = [300, 15, 300, 40, 60]
-        ob_low = [100, -15, 10, -60, -40]
-    elif config.env == 'CartPole-v1':
-        ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
-        ob_high[1], ob_low[1] = 10, -10
-        ob_high[3], ob_low[3] = 10, -10
-    elif config.env == 'LunarLander-v2':
-        ob_high = [1, 1.5, 1, 1, 1, 1, 1, 1]
-        ob_low = [-1, 0, -1, -1, -1, -1, 0, 0]
+    ob_high, ob_low = get_ob_high_low(config.env, env)
 
     plt.figure(figsize=(8, 2), tight_layout=True)
     count = 1
@@ -306,6 +311,8 @@ def evaluate(model):
             m = Categorical(prob)
             a = m.sample().item()
             s_prime, r, done, info = env.step(a)
+            # env.env.render()
+
             s_lst.append(s)
             a_lst.append(a)
 
@@ -392,17 +399,15 @@ def train():
     )
 
     render = False
-    writer = SummaryWriter(log_dir=log_dir)
+    # writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed, display_screen=True)
         env.step(0)
     else:
-        env = GymEnvironment(env_name=config.env,
-                             seed=config.seed,
-                             delay_step=config.delay_step)
+        env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
+    
     state_dim, action_dim = env.get_space_dim()
-
     model = PPO(config, state_dim, action_dim).to(config.device)
     # print(model)
 
@@ -453,13 +458,7 @@ def train():
                 s_prime, r, done, _ = env.step(a)
                 ep_reward += r
 
-                if render:
-                    env.render()
-                    logger.debug([s_prime, a, r])
-                    time.sleep(1 / 10)
-
-                model.put_data((s, a, r / config.reward_scale, s_prime,
-                                logprob.item(), done))
+                model.put_data((s, a, r / config.reward_scale, s_prime, logprob.item(), done))
                 s = s_prime
 
                 steps += 1
@@ -468,7 +467,7 @@ def train():
                 if done:
                     ep_count += 1
 
-                    writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
+                    # writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
                     wandb.log({
                         'ep_reward': ep_reward,
                         'ep_count': ep_count,
@@ -502,9 +501,9 @@ def train():
             torch.save(model.state_dict(), os.path.join(
                 model_dir, 'model_{}.pkl'.format(ep_count)))
 
-        writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
+        # writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
 
-        if update_count_eq >= config.max_update:
+        if ep_count >= config.max_update:
             break
 
     torch.save(model.state_dict(), os.path.join(
@@ -513,19 +512,111 @@ def train():
 
 
 def dynamic_demo(filepath):
+    plt.ion()
+
+    def fig_plot(_rule, fig):
+        count = 1
+        axes = []
+
+        for mfID, _membership_network in enumerate(_rule.membership_network_list):
+            ax = fig.add_subplot(1, len(_rule.membership_network_list), count)
+            axes.append(ax)
+
+            count += 1
+
+            state_id = _rule.state_id[mfID]
+            x = torch.linspace(ob_low[state_id], ob_high[state_id], 100)
+            y = torch.zeros_like(x)
+
+            for i, _ in enumerate(x):
+                y[i] = _membership_network(
+                    _.reshape(-1, 1).to(config.device)).item()
+
+            ax.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
+            # point, = ax.plot(state[mfID], _membership_network(torch.unsqueeze(torch.tensor(state[mfID]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
+            # points.append(point)
+
+            plt.box(True)
+            plt.grid(axis='y')
+            plt.ylim([-0.05, 1.05])
+
+        return axes
+
+    def fig_plot_point(ax, _rule, state):
+        points = []
+
+        for i in range(len(state)):
+            point, = ax[i].plot(state[i], _rule.membership_network_list[i](torch.unsqueeze(torch.tensor(state[i]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
+            points.append(point)
+        
+        return points
+
     if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed)
+        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
         env.step(0)
     else:
-        env = GymEnvironment(env_name=config.env,
-                             seed=config.seed,
-                             delay_step=config.delay_step)
+        env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
+
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
     model.load_state_dict(torch.load(filepath))
 
-    print(evaluate(model))
+    # print(evaluate(model))
+    # exit()
+
+    rule_tree = model.policy.rule_tree
+    depth = model.policy.depth
+
+    figs_num = 2 ** depth - 1
+    ob_high, ob_low = get_ob_high_low(config.env, env)
+
+    figs = []
+    axes = []
+
+    for i in range(figs_num):
+        figs.append(plt.figure(figsize=(6, 1.5), tight_layout=True))
+        axes.append(fig_plot(rule_tree[i], figs[-1]))
+
+    score = 0.0
+    n = 10
+    
+    plt.show()
+
+    for i in range(n):
+        s = env.reset()
+        done = False
+        epi_reward = 0
+        s_lst = []
+        a_lst = []
+
+        while not done:
+            prob = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
+            m = Categorical(prob)
+            a = m.sample().item()
+
+            try:
+                [[point.remove() for point in points] for points in points_all]
+            except NameError:
+                pass
+            
+            points_all = []
+            for i in range(len(figs)):
+                points_all.append(fig_plot_point(axes[i], rule_tree[i], s))
+            # plt.pause(1 / 30)
+            print(s)
+
+            env.env.render()
+            s_prime, r, done, _ = env.step(a)
+
+            s_lst.append(s)
+            a_lst.append(a)
+
+            epi_reward += r
+            score += r
+            s = s_prime
+
+        print('epi_reward {}: {}'.format(i, epi_reward))
 
 
 if __name__ == '__main__':
@@ -560,8 +651,8 @@ if __name__ == '__main__':
                    help='The ratio of reward reduction')
     p.add_argument('--max_update',
                    type=int,
-                   default=4000,
-                   help='Max update count for training')
+                   default=10000,
+                   help='Max episode count for training')
     p.add_argument('--save_interval',
                    type=int,
                    default=1000,
@@ -661,6 +752,7 @@ if __name__ == '__main__':
 
     apply_seed(config.seed)
 
+    #* choose an entry
     train()
     # collect_buffer()
     # train_using_buffer()
