@@ -8,3 +8,4 @@ output
 wandb
 buffer
 *.sh
+run.md

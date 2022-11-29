@@ -169,7 +169,10 @@ class Rule(torch.nn.Module):
                 strength), torch.full_like(strength, 0), strength)
 
         # Method 2: use min
-        # min_strength = torch.min(membership_all, dim=1, keepdim=True)[0]
+        # strength = torch.min(membership_all, dim=1, keepdim=True)[0]
+
+        # Method 3: use mul
+        # strength = torch.prod(membership_all, dim=1, keepdim=True)
 
         return strength
 

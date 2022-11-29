@@ -32,7 +32,8 @@ class ActorMixed(torch.nn.Module):
         self.fc3 = torch.nn.Linear(HIDDEN_SIZE, action_dim)
 
         self.source_model = source_model
-        self.source_actor = lambda x: self.source_model.forward(x, LogProb=False)[1]
+        self.source_actor = lambda x: self.source_model.forward(x, LogProb=False)[1]  #*
+        # self.source_actor = self.source_model  #*
 
         self.w = 0.9
         self.w_target = 0.1
@@ -90,7 +91,7 @@ class Critic(torch.nn.Module):
 
 
 class PPO(nn.Module):
-    def __init__(self, config, state_dim, action_dim, source_filepath):
+    def __init__(self, config, state_dim, action_dim, source_filepath=None):
         super(PPO, self).__init__()
         self.config = config
         self.data = []
@@ -110,6 +111,7 @@ class PPO(nn.Module):
         else:
             if config.no_controller:
                 self.actor = Actor(state_dim, action_dim)
+                self.policy = self.actor
             else:
                 self.policy = SDT.SDT()
                 self.actor = lambda x: self.policy.forward(x, LogProb=False)[1]
@@ -123,8 +125,11 @@ class PPO(nn.Module):
         def helper(string):
             if string.startswith('policy.'):
                 return string[7:]
-            else:
-                return string
+            
+            if string.startswith('actor.'):
+                return string[6:]
+            
+            return string
 
         if source_filepath is not None:
             from main import model_discretization

@@ -594,25 +594,30 @@ def dynamic_demo(filepath):
     model = PPO(config, state_dim, action_dim).to(config.device)
     model.load_state_dict(torch.load(filepath))
 
+    torch.set_printoptions(precision=2, sci_mode=False)
+
     try:
         for i, rule in enumerate(model.policy.rule_tree):
-            print(i, rule.p_select)
+            print(i, torch.softmax(rule.p_select, 1))
+        print('---')
         print(torch.softmax(model.policy.param, 1))
     except Exception:
         pass
 
     print('Discretization...')
-    model_discretization(model)
+    model_discretization(model.policy)  #*
 
     try:
         for i, rule in enumerate(model.policy.rule_tree):
-            print(i, rule.p_select)
+            print(i, torch.softmax(rule.p_select, 1))
+        print('---')
         print(torch.softmax(model.policy.param, 1))
     except Exception:
         pass
-
-    print(evaluate(model))
-    exit()
+    
+    # exit()
+    # print(evaluate(model))
+    # exit()
 
     rule_tree = model.policy.rule_tree
     depth = model.policy.depth
@@ -650,12 +655,10 @@ def dynamic_demo(filepath):
             except NameError:
                 pass
 
-            points_all = []
-            for i in range(len(figs)):
-                points_all.append(fig_plot_point(axes[i], rule_tree[i], s))
-            # plt.pause(1 / 30)
+            # points_all = []
+            # for i in range(len(figs)):
+            #     points_all.append(fig_plot_point(axes[i], rule_tree[i], s))
             print(s)
-
             env.env.render()
             s_prime, r, done, _ = env.step(a)
 
@@ -804,6 +807,7 @@ if __name__ == '__main__':
 
     # * choose an entry
     train()
+    # train(r'tmp/model/cart-model_best.pkl')
     # train(r'tmp/model/cart-v2-d2-model_best.pkl')
     # collect_buffer()
     # train_using_buffer()
