@@ -14,21 +14,52 @@ class Actor(torch.nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
         self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
-        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        # self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.fc3 = torch.nn.Linear(HIDDEN_SIZE, action_dim)
-
-        # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        # torch.nn.init.orthogonal_(self.fc3.weight, 0.01)
 
     def forward(self, s, softmax_dim=1):
         x = F.relu(self.fc1(s))
-        x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc2(x))
         return F.softmax(self.fc3(x), dim=softmax_dim)
 
 
-class ActorContinuous(torch.nn.Module):
+class ActorMixed(torch.nn.Module):
 
+    def __init__(self, state_dim, action_dim, source_model):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
+        # self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        self.fc3 = torch.nn.Linear(HIDDEN_SIZE, action_dim)
+
+        self.source_model = source_model
+        self.source_actor = lambda x: self.source_model.forward(x, LogProb=False)[1]
+
+        self.w = 0.9
+        self.w_target = 0.1
+        self.w_epi = 3000
+
+        self.w_init = self.w
+
+    def forward(self, s, ep_count=None, softmax_dim=1):
+        if ep_count is not None:
+            self.w = max(self.w_init - ep_count * (self.w_init - self.w_target) / self.w_epi, self.w_target)
+
+        x = F.relu(self.fc1(s))
+        # x = F.relu(self.fc2(x))
+        target_model_output = F.softmax(self.fc3(x), dim=softmax_dim)
+        
+        c1 = self.w * self.source_actor(s).detach()
+        c2 = (1 - self.w) * target_model_output
+
+        if ep_count is not None and ep_count % 100 == 0:
+            print(self.w)
+            pass
+
+        return c1 + c2
+        # return target_model_output
+
+
+class ActorContinuous(torch.nn.Module):
     def __init__(self, state_dim, action_dim, action_scale=1):
         super().__init__()
         self.action_scale = action_scale
@@ -36,10 +67,6 @@ class ActorContinuous(torch.nn.Module):
         self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
         self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.fc_mu = torch.nn.Linear(HIDDEN_SIZE, action_dim)
-
-        # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        # torch.nn.init.orthogonal_(self.fc_mu.weight, 0.01)
 
     def forward(self, s):
         x = F.relu(self.fc1(s))
@@ -56,10 +83,6 @@ class Critic(torch.nn.Module):
         # self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.fc_v = torch.nn.Linear(HIDDEN_SIZE, 1)
 
-        # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
-        # torch.nn.init.orthogonal_(self.fc2.weight, 0.1)
-        # torch.nn.init.orthogonal_(self.fc_v.weight, 0.01)
-
     def forward(self, s):
         x = F.relu(self.fc1(s))
         # x = F.relu(self.fc2(x))
@@ -67,8 +90,7 @@ class Critic(torch.nn.Module):
 
 
 class PPO(nn.Module):
-
-    def __init__(self, config, state_dim, action_dim):
+    def __init__(self, config, state_dim, action_dim, source_filepath):
         super(PPO, self).__init__()
         self.config = config
         self.data = []
@@ -88,21 +110,36 @@ class PPO(nn.Module):
         else:
             if config.no_controller:
                 self.actor = Actor(state_dim, action_dim)
-            else: #*
-                # self.actor = FuzzyTreeController(state_dim, action_dim, config)
+            else:
                 self.policy = SDT.SDT()
                 self.actor = lambda x: self.policy.forward(x, LogProb=False)[1]
 
-
         self.critic = Critic(state_dim)
-
-        self.optimizer = optim.Adam(list(self.parameters())+list(self.policy.parameters()),
-                                    lr=self.config.learning_rate)
-        self.MseLoss = nn.SmoothL1Loss()
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.xavier_uniform_(m.weight)
+        
+        def helper(string):
+            if string.startswith('policy.'):
+                return string[7:]
+            else:
+                return string
+
+        if source_filepath is not None:
+            from main import model_discretization
+            # only load actor params
+            pretrained_dict = torch.load(source_filepath)
+            net2_dict = self.policy.state_dict()
+            pretrained_dict = {helper(k): v for k, v in pretrained_dict.items() if helper(k) in net2_dict.keys()}
+            net2_dict.update(pretrained_dict)
+            self.policy.load_state_dict(net2_dict)
+            model_discretization(self.policy)
+
+            self.actor = ActorMixed(state_dim, action_dim, self.policy)
+
+        self.optimizer = optim.Adam(list(self.parameters()), lr=self.config.learning_rate)
+        self.MseLoss = nn.SmoothL1Loss()
 
     def put_data(self, transition):
         self.data.append(transition)

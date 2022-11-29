@@ -12,6 +12,7 @@ class SDT(nn.Module):
         super(SDT, self).__init__()
         self.depth, self.input_dim, self.output_dim = 2, 4, 2  #* For cart
         # self.depth, self.input_dim, self.output_dim = 3, 8, 4  #* For lunar
+        # self.depth, self.input_dim, self.output_dim = 2, 5, 2  #* For flappy
 
         self.device = 'cpu'
         self.inner_node_num = 2 ** self.depth - 1
@@ -27,6 +28,7 @@ class SDT(nn.Module):
         self.linear = nn.Linear(self.input_dim+1, self.inner_node_num, bias=False)
         self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For cart
         # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For lunar
+        # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3, 4], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For flappy
 
         self.sigmoid = nn.Sigmoid()
         # temperature term
@@ -68,12 +70,20 @@ class SDT(nn.Module):
         # self.args['greatest_path_probability'] = False
 
         if True:
-            one_hot_path_probability = torch.zeros(_mu.shape).to(self.device)
-            vs, ids = torch.max(_mu, 1)  # ids is the leaf index with maximal path probability
+            disable_leaves = []
+            _mu_map = []
+            for i in range(_mu.shape[1]):
+                if i not in disable_leaves:
+                    _mu_map.append(i)
+            _mu_tmp = _mu[:, _mu_map]
+
+            one_hot_path_probability = torch.zeros(_mu_tmp.shape).to(self.device)
+            vs, ids = torch.max(_mu_tmp, 1)  # ids is the leaf index with maximal path probability
             one_hot_path_probability.scatter_(1, ids.view(-1,1), 1.)
- 
-            prediction = self.leaf_nodes(one_hot_path_probability)
-            self.max_leaf_idx = ids
+            one_hot_path_probability_new = torch.zeros(_mu.shape).to(self.device)
+            one_hot_path_probability_new[:, _mu_map] = one_hot_path_probability
+            prediction = self.leaf_nodes(one_hot_path_probability_new)
+            # self.max_leaf_idx = ids
 
         else:  # prediction value equals to the average distribution
             prediction = output
@@ -118,7 +128,7 @@ class SDT(nn.Module):
         for layer_idx in range(0, self.depth):
             _path_prob = path_prob[:, begin_idx:end_idx, :]
             penalty, alpha_list = self._cal_penalty(layer_idx, _mu, _path_prob)
-            _penalty += penalty  # extract inner nodes in current layer to calculate regularization term
+            #* _penalty += penalty  # extract inner nodes in current layer to calculate regularization term
             _alpha_list = _alpha_list + alpha_list
             _mu = _mu.view(batch_size, -1, 1).repeat(1, 1, 2)
             _mu = _mu * _path_prob

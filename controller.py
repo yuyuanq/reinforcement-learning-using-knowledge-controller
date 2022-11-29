@@ -16,12 +16,12 @@ class Controller(torch.nn.Module):
         self.config = config
 
         # For cp
-        self.rule_dict = nn.ModuleDict({
-            '0':
-            nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)]),
-            '1':
-            nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)])
-        })
+        # self.rule_dict = nn.ModuleDict({
+        #     '0':
+        #     nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)]),
+        #     '1':
+        #     nn.ModuleList([Rule([0, 1, 2, 3], self.config.device)])
+        # })
 
         # for fb
         # self.rule_dict = nn.ModuleDict({
@@ -100,7 +100,7 @@ class FuzzyTreeController(torch.nn.Module):
 class MembershipNetwork(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        hidden_size = 4  #*
+        hidden_size = 16  #*
 
         self.fc1 = torch.nn.Linear(1, hidden_size)
         self.fc2 = torch.nn.Linear(hidden_size, hidden_size)
@@ -147,10 +147,10 @@ class Rule(torch.nn.Module):
         gumbel_select = gumbel_softmax(self.p_select, hard=True)
 
         for i in range(soft_weight.shape[1]):
-            # soft_weight[:, i] = -(gumbel_select[i, 1] * membership_all[:, i])  #* adjust
+            # soft_weight[:, i] = -(gumbel_select[i, 1] * membership_all[:, i])
             soft_weight[:, i] = gumbel_select[i, 1] / membership_all[:, i]
 
-        soft_weight = softmax(soft_weight * 0.1, gumbel_select)  # * adjust
+        soft_weight = softmax(soft_weight * 0.1, gumbel_select)
         # soft_weight = torch.softmax(soft_weight, 1)
 
         strength = torch.zeros((s.shape[0], 1))

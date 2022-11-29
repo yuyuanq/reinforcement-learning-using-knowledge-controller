@@ -5,7 +5,6 @@ from torch import nn
 from torch.distributions import Categorical, MultivariateNormal, Normal
 from tensorboardX import SummaryWriter
 from env import GymEnvironment
-from agent import PPO
 import os
 from logger import logger
 from env_flappybird_kogun import FlappyBirdEnv
@@ -18,7 +17,7 @@ import pickle
 from torch import optim, nn
 from torch.autograd import Variable
 from tqdm import tqdm
-
+from agent import PPO
 
 # Global plot settings
 sns.set_style("dark")
@@ -136,7 +135,7 @@ def collect_buffer(n=1000):
             s = s_prime
 
             if done:
-                if ep_reward > 200:  #*
+                if ep_reward > 200:
                     buffer_dict['s'][epi] = s_lst
                     buffer_dict['a'][epi] = a_lst
 
@@ -231,7 +230,7 @@ def get_ob_high_low(env_name, env):
     elif env_name == 'LunarLander-v2':
         ob_high = [1, 1.5, 1, 1, 1, 1, 1, 1]
         ob_low = [-1, 0, -1, -1, -1, -1, 0, 0]
-    
+
     return ob_high, ob_low
 
 
@@ -390,7 +389,7 @@ def train_using_buffer():
             print('saved')
 
 
-def train():
+def train(source_filepath=None):
     wandb.init(
         project='knowledge-transfer',
         name=f'seed_{config.seed}',
@@ -405,11 +404,12 @@ def train():
         env = FlappyBirdEnv(seed=config.seed, display_screen=True)
         env.step(0)
     else:
-        env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
-    
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed, delay_step=config.delay_step)
+
     state_dim, action_dim = env.get_space_dim()
-    model = PPO(config, state_dim, action_dim).to(config.device)
-    # print(model)
+    model = PPO(config, state_dim, action_dim,
+                source_filepath).to(config.device)
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -450,7 +450,7 @@ def train():
                         prob = model.actor(
                             torch.as_tensor(s.reshape(1, -1),
                                             dtype=torch.float).to(
-                                                config.device))
+                                                config.device))  #* ep_count
                         m = Categorical(prob)
                         a = m.sample().item()
                         logprob = torch.log(torch.squeeze(prob)[a])
@@ -474,7 +474,7 @@ def train():
                         'steps': steps,
                         'update_count_eq': update_count_eq
                     })
-                    last_ep_reward = ep_reward
+                    # last_ep_reward = ep_reward
                     running_reward_list.append(ep_reward)
                     ep_reward = 0
                     s = env.reset()
@@ -509,6 +509,36 @@ def train():
     torch.save(model.state_dict(), os.path.join(
         model_dir, 'model_{}.pkl'.format(ep_count)))
     env.close()
+
+
+def model_discretization(model):
+    threshold_gumbel = 0.8
+
+    # action distribution
+    one_hot_probability = torch.zeros_like(model.param)
+    vs, ids = torch.max(model.param, 1)
+    one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
+    model.param = nn.Parameter(one_hot_probability * 100)
+
+    # node gumbel softmax
+    for i, rule in enumerate(model.rule_tree):
+        probs = torch.softmax(rule.p_select, 1).detach().numpy()
+        log_probs = np.log2(probs)
+        entropy = -1 * np.sum(probs * log_probs, axis=1)
+
+        disable_gumbel = []
+        for k in range(len(entropy)):
+            if entropy[k] > threshold_gumbel:
+                disable_gumbel.append(k)
+                print('cut {}, {}'.format(i, k))
+
+        one_hot_probability = torch.zeros_like(rule.p_select)
+        vs, ids = torch.max(rule.p_select, 1)
+        one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
+
+        one_hot_probability[disable_gumbel, :] = torch.tensor(
+            [1, 0], dtype=torch.float)
+        rule.p_select = nn.Parameter(one_hot_probability * 100)
 
 
 def dynamic_demo(filepath):
@@ -546,24 +576,43 @@ def dynamic_demo(filepath):
         points = []
 
         for i in range(len(state)):
-            point, = ax[i].plot(state[i], _rule.membership_network_list[i](torch.unsqueeze(torch.tensor(state[i]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
+            point, = ax[i].plot(state[i], _rule.membership_network_list[i](torch.unsqueeze(
+                torch.tensor(state[i]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
             points.append(point)
-        
+
         return points
 
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed, display_screen=True)
         env.step(0)
     else:
-        env = GymEnvironment(env_name=config.env, seed=config.seed, delay_step=config.delay_step)
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed, delay_step=config.delay_step)
 
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
     model.load_state_dict(torch.load(filepath))
 
-    # print(evaluate(model))
-    # exit()
+    try:
+        for i, rule in enumerate(model.policy.rule_tree):
+            print(i, rule.p_select)
+        print(torch.softmax(model.policy.param, 1))
+    except Exception:
+        pass
+
+    print('Discretization...')
+    model_discretization(model)
+
+    try:
+        for i, rule in enumerate(model.policy.rule_tree):
+            print(i, rule.p_select)
+        print(torch.softmax(model.policy.param, 1))
+    except Exception:
+        pass
+
+    print(evaluate(model))
+    exit()
 
     rule_tree = model.policy.rule_tree
     depth = model.policy.depth
@@ -580,7 +629,7 @@ def dynamic_demo(filepath):
 
     score = 0.0
     n = 10
-    
+
     plt.show()
 
     for i in range(n):
@@ -591,7 +640,8 @@ def dynamic_demo(filepath):
         a_lst = []
 
         while not done:
-            prob = model.actor(torch.as_tensor(s.reshape(1, -1), dtype=torch.float).to(config.device))
+            prob = model.actor(torch.as_tensor(
+                s.reshape(1, -1), dtype=torch.float).to(config.device))
             m = Categorical(prob)
             a = m.sample().item()
 
@@ -599,7 +649,7 @@ def dynamic_demo(filepath):
                 [[point.remove() for point in points] for points in points_all]
             except NameError:
                 pass
-            
+
             points_all = []
             for i in range(len(figs)):
                 points_all.append(fig_plot_point(axes[i], rule_tree[i], s))
@@ -752,9 +802,12 @@ if __name__ == '__main__':
 
     apply_seed(config.seed)
 
-    #* choose an entry
+    # * choose an entry
     train()
+    # train(r'tmp/model/cart-v2-d2-model_best.pkl')
     # collect_buffer()
     # train_using_buffer()
+
     # plot_rule(r'tmp\model\model_best.pkl')
-    # dynamic_demo(r'tmp\model\cart-d2-model_best.pkl')
+    # dynamic_demo(r'tmp\model\cart-v2-d2-model_best.pkl')
+    # dynamic_demo(r'tmp\model\cart-model_best.pkl')
