@@ -108,7 +108,7 @@ class MembershipNetwork(torch.nn.Module):
 
     def forward(self, s):
         x = F.leaky_relu(self.fc1(s))
-        x = F.leaky_relu(self.fc2(x))
+        # x = F.leaky_relu(self.fc2(x))
         x = torch.sigmoid(self.fc3(x))
 
         return x

@@ -37,7 +37,7 @@ class ActorMixed(torch.nn.Module):
 
         self.w = 0.9
         self.w_target = 0.1
-        self.w_epi = 3000
+        self.w_epi = 1000
 
         self.w_init = self.w
 
@@ -49,7 +49,7 @@ class ActorMixed(torch.nn.Module):
         # x = F.relu(self.fc2(x))
         target_model_output = F.softmax(self.fc3(x), dim=softmax_dim)
         
-        c1 = self.w * self.source_actor(s).detach()
+        c1 = self.w * self.source_actor(s)  #* .detach()
         c2 = (1 - self.w) * target_model_output
 
         if ep_count is not None and ep_count % 100 == 0:
@@ -132,14 +132,14 @@ class PPO(nn.Module):
             return string
 
         if source_filepath is not None:
-            from main import model_discretization
-            # only load actor params
             pretrained_dict = torch.load(source_filepath)
             net2_dict = self.policy.state_dict()
             pretrained_dict = {helper(k): v for k, v in pretrained_dict.items() if helper(k) in net2_dict.keys()}
             net2_dict.update(pretrained_dict)
             self.policy.load_state_dict(net2_dict)
-            model_discretization(self.policy)
+
+            from main import discretization_v3
+            # discretization_v3(self.policy)  #*
 
             self.actor = ActorMixed(state_dim, action_dim, self.policy)
 

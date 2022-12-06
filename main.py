@@ -223,11 +223,11 @@ def get_ob_high_low(env_name, env):
     if env_name == 'FlappyBird':
         ob_high = [300, 15, 300, 40, 60]
         ob_low = [100, -15, 10, -60, -40]
-    elif env_name == 'CartPole-v1':
+    elif 'CartPole' in env_name:
         ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
         ob_high[1], ob_low[1] = 10, -10
         ob_high[3], ob_low[3] = 10, -10
-    elif env_name == 'LunarLander-v2':
+    elif 'LunarLander' in env_name:
         ob_high = [1, 1.5, 1, 1, 1, 1, 1, 1]
         ob_low = [-1, 0, -1, -1, -1, -1, 0, 0]
 
@@ -310,7 +310,9 @@ def evaluate(model):
             m = Categorical(prob)
             a = m.sample().item()
             s_prime, r, done, info = env.step(a)
+
             # env.env.render()
+            # time.sleep(1 / 60)
 
             s_lst.append(s)
             a_lst.append(a)
@@ -389,6 +391,223 @@ def train_using_buffer():
             print('saved')
 
 
+def discretization_v1(model):
+    for i, rule in enumerate(model.rule_tree):
+        print(i, torch.softmax(rule.p_select, 1))
+    print('---')
+    print(torch.softmax(model.param, 1))
+
+    print('Discretization...')
+
+    threshold_gumbel = 0.8
+    
+    # action distribution
+    probs = torch.softmax(model.param, 1).detach().numpy()
+    log_probs = np.log2(probs)
+    entropy = -1 * np.sum(probs * log_probs, axis=1)
+    print('action entropy: {}'.format(entropy))
+
+    one_hot_probability = torch.zeros_like(model.param)
+    vs, ids = torch.max(model.param, 1)
+    one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
+    model.param = nn.Parameter(one_hot_probability * 100)
+
+    # node gumbel softmax
+    for i, rule in enumerate(model.rule_tree):
+        probs = torch.softmax(rule.p_select, 1).detach().numpy()
+        log_probs = np.log2(probs)
+        entropy = -1 * np.sum(probs * log_probs, axis=1)
+
+        disable_gumbel = []
+        for k in range(len(entropy)):
+            if entropy[k] > threshold_gumbel:
+                disable_gumbel.append(k)
+                print('cut {}, {}'.format(i, k))
+
+        one_hot_probability = torch.zeros_like(rule.p_select)
+        vs, ids = torch.max(rule.p_select, 1)
+        one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
+
+        one_hot_probability[disable_gumbel, :] = torch.tensor(
+            [1, 0], dtype=torch.float)
+        rule.p_select = nn.Parameter(one_hot_probability * 100)
+
+    for i, rule in enumerate(model.rule_tree):
+        print(i, torch.softmax(rule.p_select, 1))
+    print('---')
+    print(torch.softmax(model.param, 1))
+
+
+def discretization_v3(model):
+    print(torch.softmax(model.param, 1))
+
+    print('Discretization...')
+
+    # action distribution
+    probs = torch.softmax(model.param, 1).detach().numpy()
+    log_probs = np.log2(probs)
+    entropy = -1 * np.sum(probs * log_probs, axis=1)
+    print('action entropy: {}'.format(entropy))
+
+    one_hot_probability = torch.zeros_like(model.param)
+    vs, ids = torch.max(model.param, 1)
+    one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
+    model.param = nn.Parameter(one_hot_probability * 100)
+
+    print(torch.softmax(model.param, 1))
+
+
+def dynamic_demo(filepath):
+    x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
+    # x_labels = ['X', 'Y', 'VX', 'VY', 'A', 'AV', 'LC', 'RC']
+    # x_labels = ['Position', 'Velocity', 'DistenceToNext', 'PositionT', 'PositionB']
+
+    plt.ion()
+
+    def fig_plot(_rule, fig):
+        count = 1
+        axes = []
+
+        for mfID, _membership_network in enumerate(_rule.membership_network_list):
+            ax = fig.add_subplot(1, len(_rule.membership_network_list), count)
+            axes.append(ax)
+
+            count += 1
+
+            state_id = _rule.state_id[mfID]
+            x = torch.linspace(ob_low[state_id], ob_high[state_id], 100)
+            y = torch.zeros_like(x)
+
+            for i, _ in enumerate(x):
+                y[i] = _membership_network(
+                    _.reshape(-1, 1).to(config.device)).item()
+
+            ax.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
+            # point, = ax.plot(state[mfID], _membership_network(torch.unsqueeze(torch.tensor(state[mfID]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
+            # points.append(point)
+
+            plt.box(True)
+            plt.grid(axis='y')
+            plt.ylim([-0.05, 1.05])
+            plt.xlabel(x_labels[mfID], fontsize=12)
+
+        return axes
+
+    def fig_plot_point(ax, _rule, state):
+        points = []
+
+        for i in range(len(state)):
+            point, = ax[i].plot(state[i], _rule.membership_network_list[i](torch.unsqueeze(
+                torch.tensor(state[i]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
+            points.append(point)
+
+        return points
+
+    def fig_plot_membership_functions(model):
+        plt.figure(figsize=(16, 8))
+        plt.ioff()
+
+        membership_functions = model.rule_tree
+        row = len(model.state_components)
+        col = 2 ** (len(model.state_components)-1)
+
+        for i, state_component in enumerate(model.state_components):
+            for j, k in enumerate(range(2**(i)-1, 2**(i+1)-1)):
+                plt.subplot(row, col, i * col + j + 1)
+                
+                x = torch.linspace(ob_low[state_component], ob_high[state_component], 100)
+                y = torch.zeros_like(x)
+
+                for ii, _ in enumerate(x):
+                    y[ii] = membership_functions[k](
+                        _.reshape(-1, 1).to(config.device)).item()
+                
+                plt.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
+                plt.box(True)
+                plt.grid(axis='y')
+                plt.ylim([-0.05, 1.05])
+                plt.xlabel(x_labels[state_component])
+        
+        plt.tight_layout()
+        plt.show()
+
+
+    if config.env == 'FlappyBird':
+        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
+        env.step(0)
+    else:
+        env = GymEnvironment(env_name=config.env,
+                             seed=config.seed, delay_step=config.delay_step)
+
+    state_dim, action_dim = env.get_space_dim()
+
+    ob_high, ob_low = get_ob_high_low(config.env, env)
+
+    model = PPO(config, state_dim, action_dim).to(config.device)
+    model.load_state_dict(torch.load(filepath))
+
+    torch.set_printoptions(precision=2, sci_mode=False)
+    # discretization_v3(model.policy)
+    
+    print(evaluate(model))
+    exit()
+
+    fig_plot_membership_functions(model.policy)
+    exit()
+
+    rule_tree = model.policy.rule_tree
+    depth = model.policy.depth
+
+    figs_num = 2 ** depth - 1
+
+    figs = []
+    axes = []
+
+    for i in range(figs_num):
+        figs.append(plt.figure(figsize=(8, 1.5), tight_layout=True))
+        axes.append(fig_plot(rule_tree[i], figs[-1]))
+
+    score = 0.0
+    n = 10
+
+    plt.show()
+
+    for i in range(n):
+        s = env.reset()
+        done = False
+        epi_reward = 0
+        s_lst = []
+        a_lst = []
+
+        while not done:
+            prob = model.actor(torch.as_tensor(
+                s.reshape(1, -1), dtype=torch.float).to(config.device))
+            m = Categorical(prob)
+            a = m.sample().item()
+
+            try:
+                [[point.remove() for point in points] for points in points_all]
+            except NameError:
+                pass
+
+            # points_all = []
+            # for i in range(len(figs)):
+            #     points_all.append(fig_plot_point(axes[i], rule_tree[i], s))
+            
+            print(s, a)
+            env.env.render()
+            s_prime, r, done, _ = env.step(a)
+
+            s_lst.append(s)
+            a_lst.append(a)
+
+            epi_reward += r
+            score += r
+            s = s_prime
+
+        print('epi_reward {}: {}'.format(i, epi_reward))
+
+
 def train(source_filepath=None):
     wandb.init(
         project='knowledge-transfer',
@@ -401,7 +620,7 @@ def train(source_filepath=None):
     # writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
+        env = FlappyBirdEnv(seed=config.seed, display_screen=False)
         env.step(0)
     else:
         env = GymEnvironment(env_name=config.env,
@@ -509,168 +728,6 @@ def train(source_filepath=None):
     torch.save(model.state_dict(), os.path.join(
         model_dir, 'model_{}.pkl'.format(ep_count)))
     env.close()
-
-
-def model_discretization(model):
-    threshold_gumbel = 0.8
-
-    # action distribution
-    one_hot_probability = torch.zeros_like(model.param)
-    vs, ids = torch.max(model.param, 1)
-    one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
-    model.param = nn.Parameter(one_hot_probability * 100)
-
-    # node gumbel softmax
-    for i, rule in enumerate(model.rule_tree):
-        probs = torch.softmax(rule.p_select, 1).detach().numpy()
-        log_probs = np.log2(probs)
-        entropy = -1 * np.sum(probs * log_probs, axis=1)
-
-        disable_gumbel = []
-        for k in range(len(entropy)):
-            if entropy[k] > threshold_gumbel:
-                disable_gumbel.append(k)
-                print('cut {}, {}'.format(i, k))
-
-        one_hot_probability = torch.zeros_like(rule.p_select)
-        vs, ids = torch.max(rule.p_select, 1)
-        one_hot_probability.scatter_(1, ids.view(-1, 1), 1.)
-
-        one_hot_probability[disable_gumbel, :] = torch.tensor(
-            [1, 0], dtype=torch.float)
-        rule.p_select = nn.Parameter(one_hot_probability * 100)
-
-
-def dynamic_demo(filepath):
-    plt.ion()
-
-    def fig_plot(_rule, fig):
-        count = 1
-        axes = []
-
-        for mfID, _membership_network in enumerate(_rule.membership_network_list):
-            ax = fig.add_subplot(1, len(_rule.membership_network_list), count)
-            axes.append(ax)
-
-            count += 1
-
-            state_id = _rule.state_id[mfID]
-            x = torch.linspace(ob_low[state_id], ob_high[state_id], 100)
-            y = torch.zeros_like(x)
-
-            for i, _ in enumerate(x):
-                y[i] = _membership_network(
-                    _.reshape(-1, 1).to(config.device)).item()
-
-            ax.plot(x.cpu().numpy(), y.cpu().numpy(), linewidth=3)
-            # point, = ax.plot(state[mfID], _membership_network(torch.unsqueeze(torch.tensor(state[mfID]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
-            # points.append(point)
-
-            plt.box(True)
-            plt.grid(axis='y')
-            plt.ylim([-0.05, 1.05])
-
-        return axes
-
-    def fig_plot_point(ax, _rule, state):
-        points = []
-
-        for i in range(len(state)):
-            point, = ax[i].plot(state[i], _rule.membership_network_list[i](torch.unsqueeze(
-                torch.tensor(state[i]), 0).to(torch.float32)).detach().numpy(), marker='o', color='red')
-            points.append(point)
-
-        return points
-
-    if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
-        env.step(0)
-    else:
-        env = GymEnvironment(env_name=config.env,
-                             seed=config.seed, delay_step=config.delay_step)
-
-    state_dim, action_dim = env.get_space_dim()
-
-    model = PPO(config, state_dim, action_dim).to(config.device)
-    model.load_state_dict(torch.load(filepath))
-
-    torch.set_printoptions(precision=2, sci_mode=False)
-
-    try:
-        for i, rule in enumerate(model.policy.rule_tree):
-            print(i, torch.softmax(rule.p_select, 1))
-        print('---')
-        print(torch.softmax(model.policy.param, 1))
-    except Exception:
-        pass
-
-    print('Discretization...')
-    model_discretization(model.policy)  #*
-
-    try:
-        for i, rule in enumerate(model.policy.rule_tree):
-            print(i, torch.softmax(rule.p_select, 1))
-        print('---')
-        print(torch.softmax(model.policy.param, 1))
-    except Exception:
-        pass
-    
-    # exit()
-    # print(evaluate(model))
-    # exit()
-
-    rule_tree = model.policy.rule_tree
-    depth = model.policy.depth
-
-    figs_num = 2 ** depth - 1
-    ob_high, ob_low = get_ob_high_low(config.env, env)
-
-    figs = []
-    axes = []
-
-    for i in range(figs_num):
-        figs.append(plt.figure(figsize=(6, 1.5), tight_layout=True))
-        axes.append(fig_plot(rule_tree[i], figs[-1]))
-
-    score = 0.0
-    n = 10
-
-    plt.show()
-
-    for i in range(n):
-        s = env.reset()
-        done = False
-        epi_reward = 0
-        s_lst = []
-        a_lst = []
-
-        while not done:
-            prob = model.actor(torch.as_tensor(
-                s.reshape(1, -1), dtype=torch.float).to(config.device))
-            m = Categorical(prob)
-            a = m.sample().item()
-
-            try:
-                [[point.remove() for point in points] for points in points_all]
-            except NameError:
-                pass
-
-            # points_all = []
-            # for i in range(len(figs)):
-            #     points_all.append(fig_plot_point(axes[i], rule_tree[i], s))
-            print(s)
-            env.env.render()
-            s_prime, r, done, _ = env.step(a)
-
-            s_lst.append(s)
-            a_lst.append(a)
-
-            epi_reward += r
-            score += r
-            s = s_prime
-
-        print('epi_reward {}: {}'.format(i, epi_reward))
-
 
 if __name__ == '__main__':
     p = configargparse.ArgumentParser()
@@ -809,9 +866,13 @@ if __name__ == '__main__':
     train()
     # train(r'tmp/model/cart-model_best.pkl')
     # train(r'tmp/model/cart-v2-d2-model_best.pkl')
+    # train(r'tmp/model/tree-v3-s0123_best.pkl')
     # collect_buffer()
     # train_using_buffer()
 
-    # plot_rule(r'tmp\model\model_best.pkl')
     # dynamic_demo(r'tmp\model\cart-v2-d2-model_best.pkl')
     # dynamic_demo(r'tmp\model\cart-model_best.pkl')
+    # dynamic_demo(r'tmp\model\lunar-v1-d3-model_best.pkl')
+    # dynamic_demo(r'tmp\model\tree-v3-s0123-model_best.pkl')
+    # dynamic_demo(r'tmp\model\lunar-tree-v3-s2345-model_best.pkl')
+    # dynamic_demo(r'tmp\model\lunar-model_best.pkl')

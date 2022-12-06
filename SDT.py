@@ -4,13 +4,22 @@ import torch
 import torch.nn as nn
 from collections import OrderedDict
 from controller import Rule
+from controller import MembershipNetwork
 
 
 class SDT(nn.Module):
     """ Soft Desicion Tree """
     def __init__(self):
         super(SDT, self).__init__()
-        self.depth, self.input_dim, self.output_dim = 2, 4, 2  #* For cart
+        self.state_components = [0, 1, 2, 3]  #* For cart
+        # self.state_components = [2, 3, 4, 5]  #* For lunar
+        # self.state_components = [1, 3, 4]  #* For flappy
+
+        self.depth, self.input_dim, self.output_dim = len(self.state_components), 4, 2  #* For cart
+        # self.depth, self.input_dim, self.output_dim = len(self.state_components), 8, 4  #* For lunar
+        # self.depth, self.input_dim, self.output_dim = len(self.state_components), 5, 2  #* For flappy
+
+        # self.depth, self.input_dim, self.output_dim = 2, 4, 2  #* For cart
         # self.depth, self.input_dim, self.output_dim = 3, 8, 4  #* For lunar
         # self.depth, self.input_dim, self.output_dim = 2, 5, 2  #* For flappy
 
@@ -25,10 +34,15 @@ class SDT(nn.Module):
         
         # inner nodes operation
         # Initialize inner nodes and leaf nodes (input dimension on innner nodes is added by 1, serving as bias)
-        self.linear = nn.Linear(self.input_dim+1, self.inner_node_num, bias=False)
-        self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For cart
+        # self.linear = nn.Linear(self.input_dim+1, self.inner_node_num, bias=False)
+        
+        # Method 1
+        # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For cart
         # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For lunar
         # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3, 4], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For flappy
+
+        # Method 2
+        self.rule_tree = nn.ModuleList([ MembershipNetwork() for _ in range(int(2 ** self.depth - 1))])
 
         self.sigmoid = nn.Sigmoid()
         # temperature term
@@ -52,7 +66,19 @@ class SDT(nn.Module):
 
     def inner_nodes(self, x):
         # self.inner_probs = self.sigmoid(self.beta*self.linear(x))
-        self.inner_probs = torch.cat([rule(x) for rule in self.rule_tree], axis=1)
+        output = []
+        output.append(self.rule_tree[0](torch.unsqueeze(x[:, self.state_components[0]], axis=1)))
+        count = 1
+
+        for i in range(self.depth-1):
+            for _ in range(2**(i+1)-1, 2**(i+2)-1):
+                output.append(self.rule_tree[count](torch.unsqueeze(x[:, self.state_components[i+1]], axis=1)))
+                count += 1
+
+        # output = [torch.unsqueeze(v, 0) for v in output]
+        # self.inner_probs = torch.cat([rule(x) for rule in self.rule_tree], axis=1)
+        self.inner_probs = torch.cat(output, axis=1)
+
         return self.inner_probs
 
     def get_tree_weights(self, Bias=False):
@@ -71,6 +97,9 @@ class SDT(nn.Module):
 
         if True:
             disable_leaves = []
+            # disable_leaves = [4, 5, 6, 7, 12, 13, 14, 15]  #* cart
+            # disable_leaves = [1, 2, 3, 8, 12]  #* lunar
+
             _mu_map = []
             for i in range(_mu.shape[1]):
                 if i not in disable_leaves:
@@ -138,7 +167,7 @@ class SDT(nn.Module):
 
         # mean value of alpha where it's larger than 0.5, which can describe how unbalance are the decision nodes
         half_alpha_list = [i for i in _alpha_list if i > 0.5]
-        return mu, _penalty, torch.mean(torch.stack(half_alpha_list)).detach().cpu().numpy()   # mu contains the path probability for each leaf       
+        return mu, _penalty, None  # torch.mean(torch.stack(half_alpha_list)).detach().cpu().numpy()   # mu contains the path probability for each leaf       
     
     """ Calculate penalty term for inner-nodes in different layer """
     def _cal_penalty(self, layer_idx, _mu, _path_prob):
