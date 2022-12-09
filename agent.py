@@ -5,14 +5,14 @@ import torch.optim as optim
 from controller import Controller
 from torch.distributions import Categorical, MultivariateNormal, Normal
 
-HIDDEN_SIZE = 32  #*
+HIDDEN_SIZE = 128  #*
 
 class Actor(torch.nn.Module):
 
     def __init__(self, state_dim, action_dim):
         super().__init__()
         self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
-        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        # self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.fc3 = torch.nn.Linear(HIDDEN_SIZE, action_dim)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
@@ -21,7 +21,7 @@ class Actor(torch.nn.Module):
 
     def forward(self, s, softmax_dim=1):
         x = F.relu(self.fc1(s))
-        x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc2(x))
         return F.softmax(self.fc3(x), dim=softmax_dim)
 
 
@@ -51,7 +51,7 @@ class Critic(torch.nn.Module):
     def __init__(self, state_dim):
         super().__init__()
         self.fc1 = torch.nn.Linear(state_dim, HIDDEN_SIZE)
-        self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
+        # self.fc2 = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.fc_v = torch.nn.Linear(HIDDEN_SIZE, 1)
 
         # torch.nn.init.orthogonal_(self.fc1.weight, 0.1)
@@ -60,14 +60,16 @@ class Critic(torch.nn.Module):
 
     def forward(self, s):
         x = F.relu(self.fc1(s))
-        x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc2(x))
         return self.fc_v(x)
 
 
 class PPO(nn.Module):
 
-    def __init__(self, config, state_dim, action_dim):
+    def __init__(self, config, state_dim, action_dim, model_teacher):
         super(PPO, self).__init__()
+        self.model_teacher = model_teacher
+
         self.config = config
         self.data = []
 
@@ -124,7 +126,7 @@ class PPO(nn.Module):
         self.data = []
         return s, a, r, s_prime, done_mask, prob_a
 
-    def train_net(self):
+    def train_net(self, ep_count):
         s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [
             x.to(self.config.device) for x in self.make_batch()
         ]
@@ -195,9 +197,15 @@ class PPO(nn.Module):
                 surr2 = torch.clamp(ratio, 1 - self.config.eps_clip,
                                     1 + self.config.eps_clip) * advantage
 
-                loss = -torch.min(surr1, surr2) + \
+                new_action_probs = self.actor(s)
+                label = self.model_teacher(s).detach()
+
+                loss1 = -torch.min(surr1, surr2)
+                loss2 = torch.nn.functional.cross_entropy(new_action_probs, label)
+
+                loss = (loss2 if ep_count < 0 else loss1) + \
                        self.config.mse_cof * self.MseLoss(td_target, self.critic(s)) - \
-                       self.config.entropy_cof * entropy
+                       self.config.entropy_cof * entropy  #*
 
                 self.optimizer.zero_grad()
                 loss.mean().backward()

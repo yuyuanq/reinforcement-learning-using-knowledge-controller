@@ -125,7 +125,6 @@ def train():
     )
 
     render = False
-    writer = SummaryWriter(log_dir=log_dir)
 
     if config.env == 'FlappyBird':
         env = FlappyBirdEnv(seed=config.seed, display_screen=True)
@@ -136,9 +135,9 @@ def train():
                              delay_step=config.delay_step)
     state_dim, action_dim = env.get_space_dim()
 
-    model = PPO(config, state_dim, action_dim).to(config.device)
     model_teacher = Controller(state_dim, action_dim, config)
     model_teacher.p_cof = 1
+    model = PPO(config, state_dim, action_dim, model_teacher).to(config.device)
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -150,77 +149,74 @@ def train():
     ep_reward = 0
     last_ep_reward = 0
     ep_teacher_1 = 200
-    ep_teacher_2 = 100
+    ep_teacher_2 = 400
 
     s = env.reset()
     steps = 0
 
     while True:
-        for i in range(config.t_horizon ** 10):
-            with torch.no_grad():
-                if config.continuous:
-                    mu = model.actor(
-                        torch.as_tensor(s.reshape(1, -1),
-                                        dtype=torch.float).to(config.device))
-                    action_var = model.action_var.expand_as(mu)
-                    cov_mat = torch.diag_embed(action_var).to(config.device)
-                    dist = MultivariateNormal(mu, cov_mat)
-                    a = dist.sample()
-                    a = torch.clamp(a, -config.action_scale,
-                                    config.action_scale)
-                    logprob = dist.log_prob(a)
-                    a = a.cpu().data.numpy().flatten()
-                else:
-                    if i < ep_teacher_1 and ep_count < ep_teacher_2:  #*
-                        prob = model_teacher(
+        done = False
+
+        while not done:
+            for _ in range(config.t_horizon):
+                with torch.no_grad():
+                    if config.continuous:
+                        mu = model.actor(
                             torch.as_tensor(s.reshape(1, -1),
                                             dtype=torch.float).to(config.device))
+                        action_var = model.action_var.expand_as(mu)
+                        cov_mat = torch.diag_embed(action_var).to(config.device)
+                        dist = MultivariateNormal(mu, cov_mat)
+                        a = dist.sample()
+                        a = torch.clamp(a, -config.action_scale,
+                                        config.action_scale)
+                        logprob = dist.log_prob(a)
+                        a = a.cpu().data.numpy().flatten()
                     else:
-                        prob = model.actor(
-                            torch.as_tensor(s.reshape(1, -1),
-                                            dtype=torch.float).to(config.device))
-                    
-                    m = Categorical(prob)
-                    a = m.sample().item()
-                    logprob = torch.log(torch.squeeze(prob)[a])
+                        if ep_count < ep_teacher_2:  #*
+                            prob = model_teacher(
+                                torch.as_tensor(s.reshape(1, -1),
+                                                dtype=torch.float).to(config.device))
+                        else:
+                            prob = model.actor(
+                                    torch.as_tensor(s.reshape(1, -1),
+                                                    dtype=torch.float).to(config.device))
+                        
+                        m = Categorical(prob)
+                        a = m.sample().item()
+                        logprob = torch.log(torch.squeeze(prob)[a])
 
-            s_prime, r, done, _ = env.step(a)
-            ep_reward += r
+                s_prime, r, done, _ = env.step(a)
+                ep_reward += r
 
-            # time.sleep(1 / 2)
-            # print(s, a)
+                if render:
+                    env.render()
+                    logger.debug([s_prime, a, r])
+                    time.sleep(1 / 10)
 
-            # env.render()
+                model.put_data(
+                    (s, a, r / config.reward_scale, s_prime, logprob.item(), done))
+                s = s_prime
 
-            if render:
-                env.render()
-                logger.debug([s_prime, a, r])
-                time.sleep(1 / 10)
-
-            model.put_data(
-                (s, a, r / config.reward_scale, s_prime, logprob.item(), done))
-            s = s_prime
-
-            steps += 1
-            if steps % config.t_horizon == 0:
-                update_count_eq += 1
+                steps += 1
+                if steps % config.t_horizon == 0:
+                    update_count_eq += 1
 
 
-            if done:
-                ep_count += 1
-                writer.add_scalar('reward/ep_reward', ep_reward, ep_count)
-                wandb.log({'ep_reward': ep_reward, 'ep_count': ep_count, 'steps': steps, 'update_count_eq': steps // config.t_horizon})
-                last_ep_reward = ep_reward
-                ep_reward = 0
-                s = env.reset()
-                done = False
+                if done:
+                    ep_count += 1
 
-                break
+                    wandb.log({'ep_reward': ep_reward, 'ep_count': ep_count, 'steps': steps, 'update_count_eq': steps // config.t_horizon})
+                    last_ep_reward = ep_reward
+                    ep_reward = 0
+                    s = env.reset()
 
-        model.train_net()
+                    break
+
+        model.train_net(ep_count)
         update_count += 1
 
-        if update_count % config.print_interval == 0:
+        if ep_count % config.print_interval == 0:
             if config.no_controller:
                 logger.info(
                     "episode: {}, update count: {}, reward: {:.1f}, steps:{}".
@@ -231,14 +227,7 @@ def train():
                     .format(ep_count, update_count, last_ep_reward, steps,
                             model.actor.p_cof))
 
-        if update_count_eq % config.save_interval == 0:
-            torch.save(
-                model.state_dict(),
-                os.path.join(model_dir, 'model_{}.pkl'.format(update_count_eq)))
-
-        writer.add_scalar('reward/update_reward', last_ep_reward, update_count)
-
-        if update_count_eq >= config.max_update:
+        if ep_count >= config.max_update:
             break
     
     torch.save(model.state_dict(),
@@ -383,4 +372,3 @@ if __name__ == '__main__':
 
     apply_seed(config.seed)
     train()
-    # collect_buffer(100)
