@@ -221,8 +221,10 @@ def plot_controller(filepath):
 
 def get_ob_high_low(env_name, env):
     if env_name == 'FlappyBird':
-        ob_high = [300, 15, 300, 40, 60]
-        ob_low = [100, -15, 10, -60, -40]
+        # ob_high = [300, 15, 300, 40, 60]
+        # ob_low = [100, -15, 10, -60, -40]
+        ob_high = [300, 2, 300, 10, 10]
+        ob_low = [100, -2, 10, -10, -10]
     elif 'CartPole' in env_name:
         ob_high, ob_low = env.env.observation_space.high, env.env.observation_space.low
         ob_high[1], ob_low[1] = 10, -10
@@ -286,7 +288,7 @@ def plot_rule(filepath, rule_id=0):
 
 def evaluate(model):
     if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed)
+        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
         env.step(0)
     else:
         env = GymEnvironment(env_name=config.env,
@@ -312,7 +314,8 @@ def evaluate(model):
             s_prime, r, done, info = env.step(a)
 
             # env.env.render()
-            # time.sleep(1 / 60)
+            # time.sleep(1 / 10)
+            # print(s)
 
             s_lst.append(s)
             a_lst.append(a)
@@ -458,9 +461,9 @@ def discretization_v3(model):
 
 
 def dynamic_demo(filepath):
-    x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']
-    # x_labels = ['X', 'Y', 'VX', 'VY', 'A', 'AV', 'LC', 'RC']
-    # x_labels = ['Position', 'Velocity', 'DistenceToNext', 'PositionT', 'PositionB']
+    # x_labels = ['CartPosition', 'CartVelocity', 'PoleAngle', 'PoleVelocityAtTip']  #* cart
+    x_labels = ['X', 'Y', 'VX', 'VY', 'A', 'AV', 'LC', 'RC']  #* lunar
+    # x_labels = ['Position', 'Velocity', 'DistenceToNext', 'Position - PositionT', 'Position - PositionB']  #* flappy
 
     plt.ion()
 
@@ -547,9 +550,10 @@ def dynamic_demo(filepath):
     model.load_state_dict(torch.load(filepath))
 
     torch.set_printoptions(precision=2, sci_mode=False)
-    # discretization_v3(model.policy)
+    discretization_v3(model.policy)  #*
     
     print(evaluate(model))
+    # print(model.policy.leaf_use_count / np.sum(model.policy.leaf_use_count))
     exit()
 
     fig_plot_membership_functions(model.policy)
@@ -629,6 +633,12 @@ def train(source_filepath=None):
     state_dim, action_dim = env.get_space_dim()
     model = PPO(config, state_dim, action_dim,
                 source_filepath).to(config.device)
+    
+    # pretrained_dict = torch.load(r'tmp/model/cart-model_best.pkl')
+    # net_dict = model.state_dict()
+    # pretrained_dict = {k: v for k, v in pretrained_dict.items() if (k in net_dict.keys())}
+    # net_dict.update(pretrained_dict)
+    # model.load_state_dict(net_dict)
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -669,7 +679,7 @@ def train(source_filepath=None):
                         prob = model.actor(
                             torch.as_tensor(s.reshape(1, -1),
                                             dtype=torch.float).to(
-                                                config.device))  #* ep_count
+                                                config.device), ep_count)  #* ep_count
                         m = Categorical(prob)
                         a = m.sample().item()
                         logprob = torch.log(torch.squeeze(prob)[a])
@@ -863,16 +873,26 @@ if __name__ == '__main__':
     apply_seed(config.seed)
 
     # * choose an entry
-    train()
+    # train()
+
     # train(r'tmp/model/cart-model_best.pkl')
-    # train(r'tmp/model/cart-v2-d2-model_best.pkl')
-    # train(r'tmp/model/tree-v3-s0123_best.pkl')
+    train(r'tmp/model/cart-tree-v3-s0123-model_best.pkl')
+
+    # train(r'tmp\model\flappy-model_best.pkl')
+    # train(r'tmp/model/flappy-tree-v3-s134-model_best.pkl')
+
+    # train(r'tmp/model/lunar-tree-v3-s2345-model_best.pkl')
+    # train(r'tmp/model/lunar-model_best.pkl')
+
     # collect_buffer()
     # train_using_buffer()
 
-    # dynamic_demo(r'tmp\model\cart-v2-d2-model_best.pkl')
+    # dynamic_demo(r'tmp\model\cart-tree-v3-s0123-model_best.pkl')
     # dynamic_demo(r'tmp\model\cart-model_best.pkl')
-    # dynamic_demo(r'tmp\model\lunar-v1-d3-model_best.pkl')
-    # dynamic_demo(r'tmp\model\tree-v3-s0123-model_best.pkl')
+
     # dynamic_demo(r'tmp\model\lunar-tree-v3-s2345-model_best.pkl')
+    # dynamic_demo(r'tmp\model\lunar-tree-v3-sall-model_best.pkl')
     # dynamic_demo(r'tmp\model\lunar-model_best.pkl')
+
+    # dynamic_demo(r'tmp\model\flappy-model_best.pkl')
+    # dynamic_demo(r'tmp\model\flappy-tree-v3-s134-model_best.pkl')

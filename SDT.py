@@ -5,18 +5,20 @@ import torch.nn as nn
 from collections import OrderedDict
 from controller import Rule
 from controller import MembershipNetwork
+import numpy as np
 
 
 class SDT(nn.Module):
     """ Soft Desicion Tree """
+
     def __init__(self):
         super(SDT, self).__init__()
         self.state_components = [0, 1, 2, 3]  #* For cart
-        # self.state_components = [2, 3, 4, 5]  #* For lunar
+        # self.state_components = [2, 3, 4, 5]  # * For lunar
         # self.state_components = [1, 3, 4]  #* For flappy
 
         self.depth, self.input_dim, self.output_dim = len(self.state_components), 4, 2  #* For cart
-        # self.depth, self.input_dim, self.output_dim = len(self.state_components), 8, 4  #* For lunar
+        # self.depth, self.input_dim, self.output_dim = len(self.state_components), 8, 4  # * For lunar
         # self.depth, self.input_dim, self.output_dim = len(self.state_components), 5, 2  #* For flappy
 
         # self.depth, self.input_dim, self.output_dim = 2, 4, 2  #* For cart
@@ -27,37 +29,43 @@ class SDT(nn.Module):
         self.inner_node_num = 2 ** self.depth - 1
         self.leaf_num = 2 ** self.depth
         self.max_depth = self.depth
-        self.max_leaf_idx=None  # the leaf index with maximal path probability
-        
+        self.max_leaf_idx = None  # the leaf index with maximal path probability
+
         # Different penalty coefficients for nodes in different layer
-        self.penalty_list = [0.001 * (2 ** (-depth)) for depth in range(0, self.depth)] 
-        
+        self.penalty_list = [0.001 * (2 ** (-depth))
+                             for depth in range(0, self.depth)]
+
         # inner nodes operation
         # Initialize inner nodes and leaf nodes (input dimension on innner nodes is added by 1, serving as bias)
         # self.linear = nn.Linear(self.input_dim+1, self.inner_node_num, bias=False)
-        
+
         # Method 1
         # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For cart
         # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3, 4, 5, 6, 7], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For lunar
         # self.rule_tree = nn.ModuleList([Rule([0, 1, 2, 3, 4], self.device) for _ in range(int(2 ** self.depth - 1))])  #* For flappy
 
         # Method 2
-        self.rule_tree = nn.ModuleList([ MembershipNetwork() for _ in range(int(2 ** self.depth - 1))])
+        self.rule_tree = nn.ModuleList(
+            [MembershipNetwork() for _ in range(int(2 ** self.depth - 1))])
 
         self.sigmoid = nn.Sigmoid()
         # temperature term
         if False:
-            beta = torch.randn(self.inner_node_num)  # use different beta for each node
+            # use different beta for each node
+            beta = torch.randn(self.inner_node_num)
             # beta = torch.randn(1)     # or use one beta across all nodes
             self.beta = nn.Parameter(beta)
         else:
-            self.beta = torch.ones(1).to(self.device)   # or use one beta across all nodes
+            # or use one beta across all nodes
+            self.beta = torch.ones(1).to(self.device)
 
         # leaf nodes operation
         # p*softmax(Q) instead of softmax(p*Q)
         param = torch.randn(self.leaf_num, self.output_dim)
         self.param = nn.Parameter(param)
         self.softmax = nn.Softmax(dim=1)
+
+        self.leaf_use_count = np.zeros(2 ** self.depth)
 
     def leaf_nodes(self, p):
         distribution_per_leaf = self.softmax(self.param)
@@ -67,12 +75,14 @@ class SDT(nn.Module):
     def inner_nodes(self, x):
         # self.inner_probs = self.sigmoid(self.beta*self.linear(x))
         output = []
-        output.append(self.rule_tree[0](torch.unsqueeze(x[:, self.state_components[0]], axis=1)))
+        output.append(self.rule_tree[0](torch.unsqueeze(
+            x[:, self.state_components[0]], axis=1)))
         count = 1
 
         for i in range(self.depth-1):
             for _ in range(2**(i+1)-1, 2**(i+2)-1):
-                output.append(self.rule_tree[count](torch.unsqueeze(x[:, self.state_components[i+1]], axis=1)))
+                output.append(self.rule_tree[count](torch.unsqueeze(
+                    x[:, self.state_components[i+1]], axis=1)))
                 count += 1
 
         # output = [torch.unsqueeze(v, 0) for v in output]
@@ -84,21 +94,20 @@ class SDT(nn.Module):
     def get_tree_weights(self, Bias=False):
         """Return tree weights as a list"""
         if Bias:
-            return self.state_dict()['linear.weight'].detach().cpu().numpy()   
+            return self.state_dict()['linear.weight'].detach().cpu().numpy()
         else:  # no bias
             return self.state_dict()['linear.weight'][:, 1:].detach().cpu().numpy()
 
-
     def forward(self, data, LogProb=True, Alpha=False, Weights=False):
         _mu, _penalty, _alpha = self._forward(data)
-        output = self.leaf_nodes(_mu) # average over leaves
+        output = self.leaf_nodes(_mu)  # average over leaves
 
         # self.args['greatest_path_probability'] = False
 
         if True:
             disable_leaves = []
             # disable_leaves = [4, 5, 6, 7, 12, 13, 14, 15]  #* cart
-            # disable_leaves = [1, 2, 3, 8, 12]  #* lunar
+            # disable_leaves = [0, 3, 4, 6, 8, 9, 10, 12]  #* lunar
 
             _mu_map = []
             for i in range(_mu.shape[1]):
@@ -106,10 +115,18 @@ class SDT(nn.Module):
                     _mu_map.append(i)
             _mu_tmp = _mu[:, _mu_map]
 
-            one_hot_path_probability = torch.zeros(_mu_tmp.shape).to(self.device)
-            vs, ids = torch.max(_mu_tmp, 1)  # ids is the leaf index with maximal path probability
-            one_hot_path_probability.scatter_(1, ids.view(-1,1), 1.)
-            one_hot_path_probability_new = torch.zeros(_mu.shape).to(self.device)
+            one_hot_path_probability = torch.zeros(
+                _mu_tmp.shape).to(self.device)
+            # ids is the leaf index with maximal path probability
+            vs, ids = torch.max(_mu_tmp, 1)
+
+            # print(_mu_tmp)
+            for id_ in ids:
+                self.leaf_use_count[_mu_map[id_]] += 1
+
+            one_hot_path_probability.scatter_(1, ids.view(-1, 1), 1.)
+            one_hot_path_probability_new = torch.zeros(
+                _mu.shape).to(self.device)
             one_hot_path_probability_new[:, _mu_map] = one_hot_path_probability
             prediction = self.leaf_nodes(one_hot_path_probability_new)
             # self.max_leaf_idx = ids
@@ -129,66 +146,76 @@ class SDT(nn.Module):
             L1_reg = torch.tensor(0., requires_grad=True).to(self.device)
             for name, param in self.named_parameters():
                 if name == 'linear.weight':
-                    L1_reg = L1_reg + torch.norm(param[:, 1:], 1).to(self.device)  # ignore the bias term; L1 norm
+                    # ignore the bias term; L1 norm
+                    L1_reg = L1_reg + \
+                        torch.norm(param[:, 1:], 1).to(self.device)
 
-            _penalty+=5e-3*L1_reg
-            
+            _penalty += 5e-3*L1_reg
+
         outputs = (prediction, output, _penalty, )
         if Weights:
             outputs = outputs + (weights, )
         if Alpha:
             outputs = outputs + (_alpha, )
         return outputs
-    
+
     """ Core implementation on data forwarding in SDT """
+
     def _forward(self, data):
         batch_size = data.size()[0]
         # data = self._data_augment_(data)
         path_prob = self.inner_nodes(data)
         path_prob = torch.unsqueeze(path_prob, dim=2)
         path_prob = torch.cat((path_prob, 1-path_prob), dim=2)
-        _mu = data.data.new(batch_size,1,1).fill_(1.)
+        _mu = data.data.new(batch_size, 1, 1).fill_(1.)
         _penalty = torch.tensor(0.).to(self.device)
-        
+
         begin_idx = 0
         end_idx = 1
-        _alpha_list=[]
-        
+        _alpha_list = []
+
         for layer_idx in range(0, self.depth):
             _path_prob = path_prob[:, begin_idx:end_idx, :]
             penalty, alpha_list = self._cal_penalty(layer_idx, _mu, _path_prob)
-            #* _penalty += penalty  # extract inner nodes in current layer to calculate regularization term
+            # * _penalty += penalty  # extract inner nodes in current layer to calculate regularization term
             _alpha_list = _alpha_list + alpha_list
             _mu = _mu.view(batch_size, -1, 1).repeat(1, 1, 2)
             _mu = _mu * _path_prob
             begin_idx = end_idx  # index for each layer
             end_idx = begin_idx + 2 ** (layer_idx+1)
-        mu = _mu.view(batch_size, self.leaf_num)  
+        mu = _mu.view(batch_size, self.leaf_num)
 
         # mean value of alpha where it's larger than 0.5, which can describe how unbalance are the decision nodes
         half_alpha_list = [i for i in _alpha_list if i > 0.5]
-        return mu, _penalty, None  # torch.mean(torch.stack(half_alpha_list)).detach().cpu().numpy()   # mu contains the path probability for each leaf       
-    
+        # torch.mean(torch.stack(half_alpha_list)).detach().cpu().numpy()   # mu contains the path probability for each leaf
+        return mu, _penalty, None
+
     """ Calculate penalty term for inner-nodes in different layer """
+
     def _cal_penalty(self, layer_idx, _mu, _path_prob):
-        penalty = torch.tensor(0.).to(self.device)     
+        penalty = torch.tensor(0.).to(self.device)
         batch_size = _mu.size()[0]
         _mu = _mu.view(batch_size, 2**layer_idx)
         _path_prob = _path_prob.view(batch_size, 2**(layer_idx+1))
-        alpha_list=[]
+        alpha_list = []
         for node in range(0, 2**(layer_idx+1)):
             numerical_bound = 1e-7  # prevent numerical issue
-            alpha = torch.sum(_path_prob[:, node]*_mu[:,node//2], dim=0) / (torch.sum(_mu[:,node//2], dim=0) + numerical_bound)  # not dividing 0.
-            origin_alpha=alpha
+            # not dividing 0.
+            alpha = torch.sum(_path_prob[:, node]*_mu[:, node//2], dim=0) / (
+                torch.sum(_mu[:, node//2], dim=0) + numerical_bound)
+            origin_alpha = alpha
             # if alpha ==1 or alpha ==  0, log will cause numerical problem, so alpha should be bounded
-            alpha = torch.clamp(alpha, numerical_bound, 1-numerical_bound)  # no log(negative value)
+            # no log(negative value)
+            alpha = torch.clamp(alpha, numerical_bound, 1-numerical_bound)
             alpha_list.append(alpha)
             if torch.isnan(torch.tensor(alpha_list)).any():
                 print(origin_alpha, alpha)
-            penalty -= self.penalty_list[layer_idx] * 0.5 * (torch.log(alpha) + torch.log(1-alpha))
+            penalty -= self.penalty_list[layer_idx] * \
+                0.5 * (torch.log(alpha) + torch.log(1-alpha))
         return penalty, alpha_list
-    
+
     """ Add constant 1 onto the front of each instance, serving as the bias """
+
     def _data_augment_(self, input):
         batch_size = input.size()[0]
         input = input.view(batch_size, -1)
@@ -202,4 +229,3 @@ class SDT(nn.Module):
     def load_model(self, model_path, id=''):
         self.load_state_dict(torch.load(model_path+id, map_location='cpu'))
         self.eval()
-

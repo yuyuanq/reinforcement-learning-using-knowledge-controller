@@ -54,10 +54,9 @@ class ActorMixed(torch.nn.Module):
 
         if ep_count is not None and ep_count % 100 == 0:
             print(self.w)
-            pass
-
+        
         return c1 + c2
-        # return target_model_output
+        # return self.source_actor(s)
 
 
 class ActorContinuous(torch.nn.Module):
@@ -130,6 +129,12 @@ class PPO(nn.Module):
                 return string[6:]
             
             return string
+        
+        def helper2(string):
+            if string.startswith('critic.'):
+                return string[7:]
+            
+            return string
 
         if source_filepath is not None:
             pretrained_dict = torch.load(source_filepath)
@@ -138,8 +143,14 @@ class PPO(nn.Module):
             net2_dict.update(pretrained_dict)
             self.policy.load_state_dict(net2_dict)
 
+            net3_dict = self.critic.state_dict()
+            critic_pretrained_dict = torch.load(source_filepath)
+            critic_pretrained_dict = {helper2(k): v for k, v in critic_pretrained_dict.items() if helper2(k) in net3_dict.keys()}
+            net3_dict.update(critic_pretrained_dict)
+            self.critic.load_state_dict(net3_dict)
+
             from main import discretization_v3
-            # discretization_v3(self.policy)  #*
+            discretization_v3(self.policy)  #*
 
             self.actor = ActorMixed(state_dim, action_dim, self.policy)
 
