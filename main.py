@@ -135,6 +135,7 @@ def train():
     state_dim, action_dim = env.get_space_dim()
 
     model = PPO(config, state_dim, action_dim).to(config.device)
+    print(sum([param.nelement() for param in model.actor.parameters()]))
 
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -212,7 +213,7 @@ def train():
             model.train_net()
             update_count += 1
 
-        if update_count % config.print_interval == 0:
+        if update_count_eq % config.print_interval == 0:
             if config.no_controller:
                 logger.info(
                     "episode: {}, update count: {}, reward: {:.1f}, steps:{}".
@@ -374,4 +375,3 @@ if __name__ == '__main__':
 
     apply_seed(config.seed)
     train()
-    # collect_buffer(100)
