@@ -14,8 +14,8 @@ class SDT(nn.Module):
     def __init__(self):
         super(SDT, self).__init__()
         self.state_components = [0, 1, 2, 3]  #* For cart
-        # self.state_components = [2, 3, 4, 5]  # * For lunar
-        # self.state_components = [1, 3, 4]  #* For flappy
+        # self.state_components = [0, 1, 2, 3, 4, 5]  # * For lunar
+        # self.state_components = [1, 3, 4]  #*For flappy
 
         self.depth, self.input_dim, self.output_dim = len(self.state_components), 4, 2  #* For cart
         # self.depth, self.input_dim, self.output_dim = len(self.state_components), 8, 4  # * For lunar

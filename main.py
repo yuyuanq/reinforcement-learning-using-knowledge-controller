@@ -288,7 +288,7 @@ def plot_rule(filepath, rule_id=0):
 
 def evaluate(model):
     if config.env == 'FlappyBird':
-        env = FlappyBirdEnv(seed=config.seed, display_screen=True)
+        env = FlappyBirdEnv(seed=config.seed, display_screen=False)
         env.step(0)
     else:
         env = GymEnvironment(env_name=config.env,
@@ -314,7 +314,7 @@ def evaluate(model):
             s_prime, r, done, info = env.step(a)
 
             # env.env.render()
-            # time.sleep(1 / 10)
+            # time.sleep(1 / 30)
             # print(s)
 
             s_lst.append(s)
@@ -547,11 +547,16 @@ def dynamic_demo(filepath):
     ob_high, ob_low = get_ob_high_low(config.env, env)
 
     model = PPO(config, state_dim, action_dim).to(config.device)
-    model.load_state_dict(torch.load(filepath))
+    
+    pretrained_dict = torch.load(filepath)
+    net_dict = model.state_dict()
+    pretrained_dict = {k:v for k, v in pretrained_dict.items() if k in net_dict.keys()}
+    net_dict.update(pretrained_dict)
+    model.load_state_dict(net_dict)
 
     torch.set_printoptions(precision=2, sci_mode=False)
-    discretization_v3(model.policy)  #*
-    
+
+    # discretization_v3(model.policy)  #*
     print(evaluate(model))
     # print(model.policy.leaf_use_count / np.sum(model.policy.leaf_use_count))
     exit()
@@ -679,7 +684,7 @@ def train(source_filepath=None):
                         prob = model.actor(
                             torch.as_tensor(s.reshape(1, -1),
                                             dtype=torch.float).to(
-                                                config.device), ep_count)  #* ep_count
+                                                config.device))  #* ep_count
                         m = Categorical(prob)
                         a = m.sample().item()
                         logprob = torch.log(torch.squeeze(prob)[a])
@@ -873,14 +878,15 @@ if __name__ == '__main__':
     apply_seed(config.seed)
 
     # * choose an entry
-    # train()
+    train()
 
     # train(r'tmp/model/cart-model_best.pkl')
-    train(r'tmp/model/cart-tree-v3-s0123-model_best.pkl')
+    # train(r'tmp/model/cart-tree-v3-s0123-model_best.pkl')
 
     # train(r'tmp\model\flappy-model_best.pkl')
     # train(r'tmp/model/flappy-tree-v3-s134-model_best.pkl')
 
+    # train(r'tmp/model/lunar-tree-v3-sall-model_best.pkl')
     # train(r'tmp/model/lunar-tree-v3-s2345-model_best.pkl')
     # train(r'tmp/model/lunar-model_best.pkl')
 
@@ -896,3 +902,4 @@ if __name__ == '__main__':
 
     # dynamic_demo(r'tmp\model\flappy-model_best.pkl')
     # dynamic_demo(r'tmp\model\flappy-tree-v3-s134-model_best.pkl')
+ 

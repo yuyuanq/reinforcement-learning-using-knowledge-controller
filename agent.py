@@ -49,6 +49,7 @@ class ActorMixed(torch.nn.Module):
         # x = F.relu(self.fc2(x))
         target_model_output = F.softmax(self.fc3(x), dim=softmax_dim)
         
+        # self.w = 0.5
         c1 = self.w * self.source_actor(s)  #* .detach()
         c2 = (1 - self.w) * target_model_output
 
