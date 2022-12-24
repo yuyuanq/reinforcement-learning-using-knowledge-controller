@@ -5,6 +5,7 @@ import torch.optim as optim
 from controller import Controller, FuzzyTreeController
 from torch.distributions import Categorical, MultivariateNormal, Normal
 import SDT
+import os
 
 
 HIDDEN_SIZE = 128  #*
@@ -40,24 +41,16 @@ class ActorMixed(torch.nn.Module):
         self.w_epi = 1000
 
         self.w_init = self.w
+        self.ep_count = 0
 
     def forward(self, s, ep_count=None, softmax_dim=1):
         if ep_count is not None:
-            self.w = max(self.w_init - ep_count * (self.w_init - self.w_target) / self.w_epi, self.w_target)
+            self.ep_count = ep_count
 
         x = F.relu(self.fc1(s))
-        # x = F.relu(self.fc2(x))
         target_model_output = F.softmax(self.fc3(x), dim=softmax_dim)
-        
-        # self.w = 0.5
-        c1 = self.w * self.source_actor(s)  #* .detach()
-        c2 = (1 - self.w) * target_model_output
 
-        if ep_count is not None and ep_count % 100 == 0:
-            print(self.w)
-        
-        return c1 + c2
-        # return self.source_actor(s)
+        return target_model_output
 
 
 class ActorContinuous(torch.nn.Module):
@@ -252,10 +245,16 @@ class PPO(nn.Module):
                 surr2 = torch.clamp(ratio, 1 - self.config.eps_clip,
                                     1 + self.config.eps_clip) * advantage
 
-                loss = -torch.min(surr1, surr2) + \
-                       self.config.mse_cof * self.MseLoss(td_target.detach(), self.critic(s)) - \
-                       self.config.entropy_cof * entropy
+                if self.actor.ep_count > int(os.environ.get("EP_THRESHOLD")):
+                    loss = -torch.min(surr1, surr2) + \
+                        self.config.mse_cof * self.MseLoss(td_target.detach(), self.critic(s)) - \
+                        self.config.entropy_cof * entropy
+                else:
+                    label = self.actor.source_actor(s).detach()
 
+                    # loss = F.kl_div(pi.softmax(dim=-1).log(), label.softmax(dim=-1), reduction='sum') + self.config.mse_cof * self.MseLoss(td_target.detach(), self.critic(s))
+                    loss = F.cross_entropy(pi, label) + self.config.mse_cof * self.MseLoss(td_target.detach(), self.critic(s))
+                
                 self.optimizer.zero_grad()
                 loss.mean().backward()
                 # nn.utils.clip_grad_norm_(self.parameters(), 0.5)

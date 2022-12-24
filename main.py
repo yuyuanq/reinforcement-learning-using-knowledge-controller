@@ -684,7 +684,7 @@ def train(source_filepath=None):
                         prob = model.actor(
                             torch.as_tensor(s.reshape(1, -1),
                                             dtype=torch.float).to(
-                                                config.device))  #* ep_count
+                                                config.device), ep_count)  #* ep_count
                         m = Categorical(prob)
                         a = m.sample().item()
                         logprob = torch.log(torch.squeeze(prob)[a])
@@ -878,10 +878,10 @@ if __name__ == '__main__':
     apply_seed(config.seed)
 
     # * choose an entry
-    train()
+    # train()
 
     # train(r'tmp/model/cart-model_best.pkl')
-    # train(r'tmp/model/cart-tree-v3-s0123-model_best.pkl')
+    train(r'tmp/model/cart-tree-v3-s0123-model_best.pkl')
 
     # train(r'tmp\model\flappy-model_best.pkl')
     # train(r'tmp/model/flappy-tree-v3-s134-model_best.pkl')
