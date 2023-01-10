@@ -137,6 +137,24 @@ class HardRule(torch.nn.Module):
     def __init__(self, rule_list, device):
         super().__init__()
         self.rule_list = rule_list
+        self.device = device
+
+    def forward(self, s):
+        if len(s.shape) == 1:
+            s = s.reshape(1, -1)
+
+        return torch.min(torch.cat([
+                torch.as_tensor(self.rule_list[i]
+                                (torch.as_tensor(s[:, i].cpu().numpy()))).to(self.device)
+            for i in range(len(self.rule_list))
+        ], 1),1, keepdim=True)[0]
+
+
+class _HardRule(torch.nn.Module):
+
+    def __init__(self, rule_list, device):
+        super().__init__()
+        self.rule_list = rule_list
         self.w_list = nn.Parameter(torch.ones((len(rule_list) + 1)))
         self.device = device
 
@@ -146,9 +164,7 @@ class HardRule(torch.nn.Module):
                 torch.as_tensor(self.rule_list[i]
                                 (s[:, i].cpu().numpy())), 1).to(self.device)
             for i in range(len(self.rule_list))
-        ], 1),
-                                           1,
-                                           keepdim=True)[0]
+        ], 1),1, keepdim=True)[0]
 
 
 class HardRuleContinuous(torch.nn.Module):

@@ -172,7 +172,7 @@ def train():
                         a = a.cpu().data.numpy().flatten()
                     else:
                         prob = model.actor(
-                            torch.as_tensor(s.reshape(1, -1),
+                            torch.as_tensor(s,
                                             dtype=torch.float).to(
                                                 config.device))
                         m = Categorical(prob)
@@ -217,11 +217,11 @@ def train():
             if config.no_controller:
                 logger.info(
                     "episode: {}, update count: {}, reward: {:.1f}, steps:{}".
-                    format(ep_count, update_count, last_ep_reward, steps))
+                    format(ep_count, update_count_eq, last_ep_reward, steps))
             else:
                 logger.info(
                     "episode: {}, update count: {}, reward: {:.1f}, steps:{}, p_cof: {:.2f}"
-                    .format(ep_count, update_count, last_ep_reward, steps,
+                    .format(ep_count, update_count_eq, last_ep_reward, steps,
                             model.actor.p_cof))
 
         if update_count_eq % config.save_interval == 0:

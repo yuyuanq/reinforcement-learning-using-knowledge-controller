@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from controller import Controller
 from torch.distributions import Categorical, MultivariateNormal, Normal
+import math
 
 HIDDEN_SIZE = 32  #*
 
@@ -128,8 +129,6 @@ class PPO(nn.Module):
         s_, a_, r_, s_prime_, done_mask_, log_prob_a_ = [
             x.to(self.config.device) for x in self.make_batch()
         ]
-        mini_batch = s_.shape[0] // (1 if not self.config.use_minibatch else
-                                     self.config.minibatch)
 
         for _ in range(self.config.k_epoch):
             with torch.no_grad():
@@ -167,13 +166,23 @@ class PPO(nn.Module):
                                               dtype=torch.float).to(
                                                   self.config.device)
 
+            if not self.config.use_minibatch:
+                mini_batch = s_.shape[0]
+                epoch = 1
+            else:
+                mini_batch = self.config.minibatch
+                epoch = int(math.ceil(s_.shape[0] / self.config.minibatch))
+
             # In most cases, do not use mini batch
-            for k in range(s_.shape[0] // mini_batch):
+            for k in range(epoch):
                 s = s_[mini_batch * k:mini_batch * (k + 1), :]
                 a = a_[mini_batch * k:mini_batch * (k + 1), :]
                 log_prob_a = log_prob_a_[mini_batch * k:mini_batch *
                                          (k + 1), :]
                 advantage = advantage_[mini_batch * k:mini_batch * (k + 1), :]
+
+                # if len(advantage) > 1:
+                #     advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
                 td_target = td_target_[mini_batch * k:mini_batch * (k + 1), :]
 
                 if self.config.continuous:
